@@ -172,8 +172,8 @@ export function applyFiatMinimum(rows,settings,quote,now=Date.now()){
    Number.isFinite(resaleFeesPct)
     ?reference*qty*(1-resaleFeesPct/100)-total:null;
   const estimatedProfitAud=threshold.available&&estimatedProfitEth!==null?estimatedProfitEth*threshold.spot:null;
-  const minProfitPassed=estimatedProfitAud!==null &&
-   estimatedProfitAud+1e-8>=minimumProfitAud;
+  const minProfitPassed=minimumProfitAud<=0||
+   (estimatedProfitAud!==null&&estimatedProfitAud+1e-8>=minimumProfitAud);
   return {...row,estimatedFiatCost,fiatMinPassed,estimatedProfitEth,
    estimatedProfitAud,minProfitPassed,eligible:row.eligible===true&&fiatMinPassed&&minProfitPassed};
  });
