@@ -1,5 +1,6 @@
-# Launched by the verified-release updater (either automatic when enabled or manually confirmed).
-# The server validates the GitHub release asset and SHA-256 before invoking us.
+# Habbo NFT Market Radar - transactional Windows updater (PowerShell 5.1+).
+# The local server downloads and verifies the release ZIP before launching this script.
+# Keep user data and .env untouched; verify the new server is alive before reporting success.
 param(
   [Parameter(Mandatory=$true)][string]$InstallDir,
   [Parameter(Mandatory=$true)][string]$ZipPath,
@@ -9,119 +10,151 @@ param(
 )
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+$InstallDir = [IO.Path]::GetFullPath($InstallDir)
 $updates = Join-Path $InstallDir 'data\updates'
 New-Item -ItemType Directory -Force -Path $updates | Out-Null
 $logFile = Join-Path $updates 'last-update.log'
 function Log([string]$message) {
-  "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $message" | Add-Content -Path $logFile
+  $msg = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') $message"
+  Add-Content -LiteralPath $logFile -Value $msg
+  Write-Host $msg
 }
-function Launch-App {
-  $launcher = Join-Path $InstallDir 'START_WINDOWS.bat'
-  if (Test-Path $launcher) {
-    Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList @('/c', ('"' + $launcher + '"')) -WorkingDirectory $InstallDir
+function Get-AppVersion {
+  try {
+    $s = Invoke-RestMethod -Uri 'http://127.0.0.1:38571/api/state' -TimeoutSec 2
+    return [string]$s.appVersion
+  } catch { return '' }
+}
+function Launch-AppVerified([string]$expectedVersion) {
+  $node = Get-Command 'node.exe' -ErrorAction Stop
+  if ((Get-AppVersion) -eq $expectedVersion) { Log "Market Radar v$expectedVersion is already healthy."; return }
+  if ((Get-AppVersion)) { throw 'Port 38571 is occupied by another running Market Radar version; refusing to take it over.' }
+  $stdout = Join-Path $updates 'last-start.stdout.log'
+  $stderr = Join-Path $updates 'last-start.stderr.log'
+  Log "Starting node server.mjs directly from $InstallDir and checking the local HTTP API."
+  $p = Start-Process -FilePath $node.Source -ArgumentList @('server.mjs') -WorkingDirectory $InstallDir -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+  for ($i=0; $i -lt 25; $i++) {
+    Start-Sleep -Milliseconds 500
+    $actual = Get-AppVersion
+    if ($actual -eq $expectedVersion) { Log "Startup verified: v$actual responded at http://127.0.0.1:38571/api/state (PID $($p.Id))."; return }
+    if ($actual) { break }
+    $p.Refresh()
+    if ($p.HasExited) { break }
   }
+  if (-not $p.HasExited) { Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue }
+  $hint = ''
+  if (Test-Path $stderr) { $hint = (Get-Content -LiteralPath $stderr -Tail 8 -ErrorAction SilentlyContinue) -join ' | ' }
+  throw "The app did not respond as v$expectedVersion after starting. $hint Read $stderr for details."
 }
 $stage = Join-Path $updates ('stage-' + $Version + '-' + [guid]::NewGuid().ToString('N'))
-$backup = Join-Path $updates ('backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+$backup = Join-Path $updates ('backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0,8))
 $files = @('package.json','package-lock.json','README.md','.gitignore','.env.example',
-           'START_WINDOWS.bat','UPDATE_WINDOWS.ps1','REPAIR_WINDOWS.ps1','core.mjs','market.mjs',
-           'trade.mjs','server.mjs','updates.mjs','public','tests')
+  'START_WINDOWS.bat','UPDATE_WINDOWS.ps1','REPAIR_WINDOWS.ps1','core.mjs','market.mjs',
+  'trade.mjs','server.mjs','updates.mjs','public','tests')
 $installedModules = Join-Path $InstallDir 'node_modules'
 $backupModules = Join-Path $backup 'node_modules'
-$modulesSwapped = $false
-$filesTouched = $false
+$stagedModules = $null
+$changed = $false
+$modulesMoved = $false
+$hadOldModules = Test-Path -LiteralPath $installedModules
+$installedVersion = ''
 try {
-  Log "Starting update to v$Version; waiting for application to close."
+  $oldPkg = Join-Path $InstallDir 'package.json'
+  if (Test-Path -LiteralPath $oldPkg) { $installedVersion = [string]((Get-Content -LiteralPath $oldPkg -Raw | ConvertFrom-Json).version) }
+  Log "Preparing v$Version (previous v$installedVersion) with recovery enabled."
+  if ($Version -notmatch '^\d+\.\d+\.\d+$') { throw 'Invalid update version.' }
+  if ($ExpectedHash -notmatch '^[A-Fa-f0-9]{64}$') { throw 'Invalid expected SHA-256 digest.' }
+  if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) { throw 'Verified update archive was not found.' }
+  if ((Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash -ne $ExpectedHash) { throw 'SHA-256 integrity check failed.' }
+  New-Item -ItemType Directory -Force -Path $stage | Out-Null
+  Expand-Archive -LiteralPath $ZipPath -DestinationPath $stage -Force
+  $source = $stage
+  if (-not (Test-Path -LiteralPath (Join-Path $source 'package.json'))) {
+    $nested = @(Get-ChildItem -LiteralPath $stage -Directory)
+    if ($nested.Count -ne 1) { throw 'Unexpected release archive layout.' }
+    $source = $nested[0].FullName
+  }
+  $pkg = Get-Content -LiteralPath (Join-Path $source 'package.json') -Raw | ConvertFrom-Json
+  if ($pkg.name -ne 'habbo-nft-market-radar' -or $pkg.version -ne $Version) { throw 'Archive identity or version mismatch.' }
+  foreach ($name in @('server.mjs','core.mjs','market.mjs','updates.mjs','UPDATE_WINDOWS.ps1',
+      'START_WINDOWS.bat','public\index.html','public\app.js','public\style.css')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $source $name))) { throw "Archive missing $name" }
+  }
+  $node = (Get-Command 'node.exe' -ErrorAction Stop).Source
+  foreach ($js in @('server.mjs','core.mjs','market.mjs','updates.mjs','trade.mjs','public\app.js')) {
+    & $node --check (Join-Path $source $js) 2>&1 | Out-Null
+    if ($LASTEXITCODE -ne 0) { throw "JavaScript syntax check failed: $js" }
+  }
+  $hasDependencies = ($null -ne $pkg.dependencies -and @($pkg.dependencies.PSObject.Properties).Count -gt 0)
+  if ($hasDependencies) {
+    $npm = (Get-Command 'npm.cmd' -ErrorAction Stop).Source
+    Log 'Installing required dependencies in staging (installed code remains untouched).'
+    Push-Location $source
+    try {
+      & $npm install --omit=dev --no-audit --no-fund
+      if ($LASTEXITCODE -ne 0) { throw 'Staged dependency install failed.' }
+    } finally { Pop-Location }
+  } else { Log 'No npm dependencies required. Skipping npm installation.' }
+  $stagedModules = Join-Path $source 'node_modules'
+  # Only now wait for the previous server to close; failed preflights never modify installed files.
   for ($i=0; $i -lt 120; $i++) {
     if (-not (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue)) { break }
     Start-Sleep -Milliseconds 500
   }
-  if (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue) {
-    throw 'Previous application is still running; no files were changed.'
-  }
-  if (-not (Test-Path -LiteralPath $ZipPath -PathType Leaf)) { throw 'Update archive was not found.' }
-  $hash = (Get-FileHash -LiteralPath $ZipPath -Algorithm SHA256).Hash
-  if ($hash -ne $ExpectedHash) { throw 'SHA-256 integrity check failed before installation.' }
-  New-Item -ItemType Directory -Force -Path $stage | Out-Null
-  Expand-Archive -LiteralPath $ZipPath -DestinationPath $stage -Force
-  $sourcePath = $stage
-  if (-not (Test-Path -LiteralPath (Join-Path $sourcePath 'package.json'))) {
-    $nested = Get-ChildItem -LiteralPath $stage -Directory | Select-Object -First 1
-    if ($null -eq $nested) { throw 'Update ZIP contains no package.json.' }
-    $sourcePath = $nested.FullName
-  }
-  $pkgFile = Join-Path $sourcePath 'package.json'
-  if (-not (Test-Path -LiteralPath $pkgFile)) { throw 'Update ZIP does not contain package.json.' }
-  $pkg = Get-Content -LiteralPath $pkgFile -Raw | ConvertFrom-Json
-  if ($pkg.name -ne 'habbo-nft-market-radar' -or $pkg.version -ne $Version) {
-    throw 'Update ZIP package/version does not match expected release.'
-  }
-  foreach ($required in @('server.mjs','core.mjs','updates.mjs','UPDATE_WINDOWS.ps1','START_WINDOWS.bat','public\index.html','public\app.js')) {
-    if (-not (Test-Path -LiteralPath (Join-Path $sourcePath $required))) { throw "Required file missing: $required" }
-  }
-  $npm = Get-Command npm.cmd -ErrorAction Stop
-  Log 'Preparing dependencies in a separate staging directory. No existing files have been touched.'
-  Push-Location $sourcePath
-  try {
-    & $npm.Source install --omit=dev --no-audit --no-fund
-    if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed in staging.' }
-  } finally { Pop-Location }
-  New-Item -ItemType Directory -Path $backup -Force | Out-Null
+  if (Get-Process -Id $ParentProcessId -ErrorAction SilentlyContinue) { throw 'Previous server did not exit; installed files are unchanged.' }
+  New-Item -ItemType Directory -Force -Path $backup | Out-Null
   foreach ($name in $files) {
-    $oldPath = Join-Path $InstallDir $name
-    if (Test-Path -LiteralPath $oldPath) {
+    $old = Join-Path $InstallDir $name
+    if (Test-Path -LiteralPath $old) {
       $dest = Join-Path $backup $name
-      $parent = Split-Path -Parent $dest
-      New-Item -ItemType Directory -Force -Path $parent | Out-Null
-      Copy-Item -LiteralPath $oldPath -Destination $dest -Recurse -Force
+      New-Item -ItemType Directory -Path (Split-Path $dest -Parent) -Force | Out-Null
+      Copy-Item -LiteralPath $old -Destination $dest -Recurse -Force
     }
   }
-  # npm creates no node_modules folder for dependency-free packages. Only swap when it exists.
-  $stagedModules = Join-Path $sourcePath 'node_modules'
+  $changed = $true
   if (Test-Path -LiteralPath $stagedModules) {
-    if (Test-Path -LiteralPath $installedModules) {
-      Move-Item -LiteralPath $installedModules -Destination $backupModules
+    if ($hadOldModules) { Move-Item -LiteralPath $installedModules -Destination $backupModules; $modulesMoved = $true }
+    Move-Item -LiteralPath $stagedModules -Destination $installedModules
+  }
+  foreach ($name in $files) {
+    $new = Join-Path $source $name
+    if (Test-Path -LiteralPath $new) {
+      $destination = Join-Path $InstallDir $name
+      if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }
+      Copy-Item -LiteralPath $new -Destination $destination -Recurse -Force
     }
-  } else { Log 'No dependencies required by release; retaining previous node_modules if present.' }
-  try {
-    if (Test-Path -LiteralPath $stagedModules) {
-      Move-Item -LiteralPath $stagedModules -Destination $installedModules
-      $modulesSwapped = $true
-    }
-    $filesTouched = $true
-    foreach ($name in $files) {
-      $new = Join-Path $sourcePath $name
-      if (Test-Path -LiteralPath $new) {
-        $destination = Join-Path $InstallDir $name
-        if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }
-        Copy-Item -LiteralPath $new -Destination $destination -Recurse -Force
-      }
-    }
-  } catch {
-    Log "Installation failed; attempting rollback: $($_.Exception.Message)"
-    if ($filesTouched) {
+  }
+  # A launch is successful only after the new API responds with the expected version.
+  Launch-AppVerified $Version
+  Log "Update to v$Version succeeded; startup verified. User data and .env were preserved."
+  if (Test-Path -LiteralPath $backupModules) { Remove-Item -LiteralPath $backupModules -Recurse -Force -ErrorAction SilentlyContinue }
+  exit 0
+} catch {
+  Log "UPDATE FAILED: $($_.Exception.Message)"
+  if ($changed) {
+    Log 'Rolling back to previous version.'
+    try {
       foreach ($name in $files) {
         $saved = Join-Path $backup $name
-        if (Test-Path -LiteralPath $saved) {
-          $destination = Join-Path $InstallDir $name
-          if (Test-Path -LiteralPath $destination -PathType Container) { Remove-Item -LiteralPath $destination -Recurse -Force }
-          Copy-Item -LiteralPath $saved -Destination $destination -Recurse -Force
-        }
+        $destination = Join-Path $InstallDir $name
+        if (Test-Path -LiteralPath $destination) { Remove-Item -LiteralPath $destination -Recurse -Force }
+        if (Test-Path -LiteralPath $saved) { Copy-Item -LiteralPath $saved -Destination $destination -Recurse -Force }
       }
-    }
-    if ($modulesSwapped -and (Test-Path -LiteralPath $installedModules)) { Remove-Item -LiteralPath $installedModules -Recurse -Force }
-    if (Test-Path -LiteralPath $backupModules) { Move-Item -LiteralPath $backupModules -Destination $installedModules }
-    throw
+      if (Test-Path -LiteralPath $backupModules) {
+        if (Test-Path -LiteralPath $installedModules) { Remove-Item -LiteralPath $installedModules -Recurse -Force }
+        Move-Item -LiteralPath $backupModules -Destination $installedModules
+      } elseif (-not $hadOldModules -and (Test-Path -LiteralPath $installedModules)) {
+        Remove-Item -LiteralPath $installedModules -Recurse -Force
+      }
+      Log 'Previous version restored.'
+    } catch { Log "ROLLBACK ERROR: $($_.Exception.Message). The backup remains at $backup" }
   }
-  Log "Updated successfully to v$Version. Local data, wallet .env and settings were kept."
-  # The old deps backup is very large; remove only after success.
-  if (Test-Path -LiteralPath $backupModules) { Remove-Item -LiteralPath $backupModules -Recurse -Force }
-} catch {
-  Log "UPDATE ERROR: $($_.Exception.Message)"
-  Write-Warning "Update failed. Check: $logFile"
+  # Recover a working app even if the update fails. Leave the log for troubleshooting.
+  if ($installedVersion) {
+    try { Launch-AppVerified $installedVersion } catch { Log "RESTART ERROR: $($_.Exception.Message)" }
+  }
+  exit 1
 } finally {
-  # Retain a small source backup and update log under data/updates for recovery.
   if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
   if (Test-Path -LiteralPath $ZipPath) { Remove-Item -LiteralPath $ZipPath -Force -ErrorAction SilentlyContinue }
-  try { Launch-App } catch { Log "Unable to restart automatically: $($_.Exception.Message)" }
 }
