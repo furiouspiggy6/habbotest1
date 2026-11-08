@@ -3,6 +3,7 @@
 // BrowserWindow is sandboxed and loads only our own loopback dashboard.
 const {app, BrowserWindow, ipcMain, shell} = require('electron');
 const {autoUpdater} = require('electron-updater');
+const {fetchLatestRelease} = require('./release-check.cjs');
 const fs = require('node:fs');
 const path = require('node:path');
 const net = require('node:net');
@@ -19,6 +20,7 @@ let checkingUpdate = false;
 let updateTimer = null;
 let networkUpdateTimer = null;
 let lastStatus = {phase:'starting', message:'Starting the desktop app...', version:app.getVersion()};
+let latestGitHubRelease = null;
 let preferencePath = '';
 
 function sendStatus(phase, message, extra={}) {
@@ -86,12 +88,41 @@ async function checkForUpdates(){
   if(!app.isPackaged){sendStatus('development','Desktop update checks work in the installed Windows application.');return;}
   if(!readAutoUpdatePreference()){sendStatus('disabled','Automatic updates turned off.');return;}
   if(checkingUpdate||installingUpdate)return;
+  if(downloadedUpdate){void installWhenSafe();return;}
   checkingUpdate=true;
+  let githubError=null;
+  latestGitHubRelease=null;
   try {
-    sendStatus('checking','Checking GitHub for desktop updates...');
-    await autoUpdater.checkForUpdates();
+    sendStatus('checking','Checking the latest published GitHub release...');
+    try {latestGitHubRelease=await fetchLatestRelease(app.getVersion());}
+    catch(error){githubError=String(error?.message||error).slice(0,160);}
+    const result=await autoUpdater.checkForUpdates();
+    // The native provider can return a stale manifest from a cache or CDN.
+    // Never tell the user they are current if the independent GitHub releases
+    // API says the installed version is behind, and never claim current when
+    // that independent check fails.
+    if(downloadedUpdate||installingUpdate)return;
+    const nativeVersion=String(result?.updateInfo?.version||'unknown');
+    if(result?.isUpdateAvailable)return; // Native download events own status.
+    if(latestGitHubRelease?.newer){
+      sendStatus('manual-update',`GitHub has v${latestGitHubRelease.version}, but the built-in updater returned ${nativeVersion}. Use the official installer to upgrade this installation once.`,{
+        latestVersion:latestGitHubRelease.version,installerUrl:latestGitHubRelease.installerUrl
+      });
+    }else if(githubError){
+      sendStatus('unverified',`The built-in updater reports no new version, but GitHub could not be checked independently: ${githubError}`);
+    }else if(latestGitHubRelease){
+      sendStatus('current',`Confirmed up to date (v${app.getVersion()}) against the published GitHub release.`);
+    }else{
+      sendStatus('unverified','The desktop updater could not verify the latest release.');
+    }
   } catch(error) {
-    sendStatus('error',`Desktop update check failed: ${String(error?.message||error).slice(0,250)}`);
+    if(latestGitHubRelease?.newer){
+      sendStatus('manual-update',`GitHub has v${latestGitHubRelease.version}, but automatic updates failed: ${String(error?.message||error).slice(0,160)}. Use the official installer.`,{
+        latestVersion:latestGitHubRelease.version,installerUrl:latestGitHubRelease.installerUrl
+      });
+    }else{
+      sendStatus('error',`Desktop update check failed: ${String(error?.message||error).slice(0,250)}`);
+    }
   } finally {checkingUpdate=false;}
 }
 async function installWhenSafe(){
@@ -121,7 +152,7 @@ function setupUpdater(){
   autoUpdater.allowPrerelease=false;
   autoUpdater.on('checking-for-update',()=>sendStatus('checking','Checking GitHub for desktop updates...'));
   autoUpdater.on('update-available',info=>sendStatus('downloading',`Update v${info.version} found. Downloading in the background...`,{newVersion:info.version}));
-  autoUpdater.on('update-not-available',()=>sendStatus('current',`You're up to date (v${app.getVersion()}).`));
+  autoUpdater.on('update-not-available',info=>sendStatus('checking',`Native updater reports v${info?.version||'unknown'}. Verifying the latest GitHub release...`));
   autoUpdater.on('download-progress',progress=>sendStatus('downloading',`Downloading desktop update: ${Math.round(progress.percent)}%`,{percent:progress.percent}));
   autoUpdater.on('update-downloaded',info=>{downloadedUpdate=info;void installWhenSafe();});
   autoUpdater.on('error',error=>{
@@ -154,6 +185,10 @@ async function run(){
     return setAutoUpdatePreference(enabled);
   });
   ipcMain.handle('radar-install-downloaded-update',()=>installWhenSafe());
+  ipcMain.handle('radar-open-latest-installer',async()=>{
+    if(!latestGitHubRelease?.newer||!latestGitHubRelease.installerUrl)throw new Error('No newer verified GitHub installer is available');
+    await shell.openExternal(latestGitHubRelease.installerUrl);
+  });
   try{
     await startBackend();
     createWindow();
