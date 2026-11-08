@@ -144,3 +144,9 @@ irm https://raw.githubusercontent.com/furiouspiggy6/habbotest1/main/REPAIR_WINDO
 ```
 
 The recovery tool uses the latest published GitHub ZIP and checksum automatically; no manual ZIP download is required. It verifies that the new API is running before declaring success. These Windows updater behaviors have not been end-to-end tested on a real Windows system; Node tests verify the application server and static updater protections.
+
+## v1.0.12: Actual-sale metadata reconciliation and candidate diagnostics
+
+The live scanner now resolves NFT metadata in balanced batches across active listings and completed sales, rather than processing all active listing IDs first. A short retry cooldown prevents permanently missing metadata from starving all subsequent IDs. Previously saved historical FILLED orders are re-hydrated when their matching NFT metadata becomes available, so their verified metadata identities can be compared with active listings. No synthetic data is introduced. Metadata resolution uses a capped request budget to avoid API flooding; coverage accumulates over subsequent scans.
+
+The market diagnostics display verified active/sold metadata counts and a **first blocking criterion** breakdown (missing metadata, too few comparable completed sales, price outside budget, insufficient discount, insufficient net resale edge, bulk quantity). Signals remain conservative with the original thresholds, and real-money trading remains disabled unless deliberately armed.
