@@ -22,6 +22,16 @@ export async function executeLiveBuy(candidate,settings,privateKey){
  if(fresh.quantity!==1||fresh.price>candidate.price||fresh.totalWithFeesEth>settings.maximumPriceEth)throw new Error('Price, quantity or fees increased.');
  if(fresh.price<settings.minPriceEth)throw new Error('Price below the minimum safety floor.');
  if(settings.minimumTotalPriceEth>0&&fresh.totalWithFeesEth<settings.minimumTotalPriceEth)throw new Error('Fresh order is below the configured AUD minimum, including buyer fees.');
+ const checkProfit=cost=>{
+  const ref=Number(candidate.reference),qty=Number(candidate.quantity);
+  const fee=Number(settings.estimatedResaleFeesPct);
+  if(!Number.isFinite(ref)||ref<=0||!Number.isFinite(qty)||qty!==1||!Number.isFinite(fee))
+   throw new Error('Reference price or resale fee is not verifiable.');
+  const estimatedProfit=ref*qty*(1-fee/100)-cost;
+  if(!Number.isFinite(estimatedProfit)||estimatedProfit+1e-12<Number(settings.minimumProfitEth??0))
+   throw new Error('Updated order falls below the minimum estimated AUD profit.');
+ };
+ checkProfit(fresh.totalWithFeesEth);
  // ERC20 approval is intentionally NEVER auto signed (could be unlimited).
  const token=new Contract(WETH,['function balanceOf(address) view returns (uint256)'],provider);
  const balance=await token.balanceOf(signer.address);
@@ -32,6 +42,7 @@ export async function executeLiveBuy(candidate,settings,privateKey){
  if(!checked||checked.id!==candidate.id||checked.contract!==candidate.contract||checked.tokenId!==candidate.tokenId)throw new Error('Settlement details could not be independently verified; aborting.');
  if(checked.price>candidate.price||checked.totalWithFeesEth>settings.maximumPriceEth)throw new Error('Settlement fees changed; aborting.');
  if(settings.minimumTotalPriceEth>0&&checked.totalWithFeesEth<settings.minimumTotalPriceEth)throw new Error('Settlement is below the configured AUD minimum.');
+ checkProfit(checked.totalWithFeesEth);
  const actions=prepared.actions||[];
  if(actions.length!==1||actions[0].type!==pkg.orderbook.ActionType.TRANSACTION)throw new Error('An allowance approval or unexpected extra action is required. Approve a limited WETH amount manually before retrying.');
  const tx=await actions[0].buildTransaction();
