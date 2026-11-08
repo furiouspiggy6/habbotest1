@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {analyze,candles,DEFAULT_SETTINGS,validateSettings,demoOrders} from './core.mjs';
 import {scanMarket} from './market.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
-import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate} from './updates.mjs';
+import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoUpdate} from './updates.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const dataDir=path.join(HERE,'data');fs.mkdirSync(dataDir,{recursive:true});
 const storePath=path.join(dataDir,'state.json');
@@ -19,22 +19,24 @@ function readState(){try{const old=JSON.parse(fs.readFileSync(storePath,'utf8'))
  // v1.0.3 started every user in an 8-item demo. One-time migration enables the
  // requested real-data scanner; future explicit demo choices are respected.
  if(!old.schemaVersion && nextSettings.mode==='demo')nextSettings.mode='live';
- return {settings:nextSettings,metadata:old.metadata??{},historicalSales:(old.historicalSales??[]).filter(x=>!String(x?.id??'').startsWith('demo-')),
+ return {settings:nextSettings,updatePrefs:{autoInstall:old.updatePrefs?.autoInstall!==false},metadata:old.metadata??{},historicalSales:(old.historicalSales??[]).filter(x=>!String(x?.id??'').startsWith('demo-')),
  paperTrades:old.paperTrades??[],liveTrades:old.liveTrades??[],events:old.events??[]};
- }catch{return {settings:validateSettings(DEFAULT_SETTINGS),metadata:{},historicalSales:[],paperTrades:[],liveTrades:[],events:[]};}}
+ }catch{return {settings:validateSettings(DEFAULT_SETTINGS),updatePrefs:{autoInstall:true},metadata:{},historicalSales:[],paperTrades:[],liveTrades:[],events:[]};}}
 const state=readState();
 let lastCheckedUpdate=null;
 let updating=false;
+let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
+let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
 let liveArmed=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
 let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[]};
-function save(){const output={schemaVersion:5,settings:state.settings,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),paperTrades:state.paperTrades.slice(-1000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
+function save(){const output={schemaVersion:6,settings:state.settings,updatePrefs:state.updatePrefs,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),paperTrades:state.paperTrades.slice(-1000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
  const tmp=storePath+'.tmp';fs.writeFileSync(tmp,JSON.stringify(output,null,2));fs.renameSync(tmp,storePath);}
 function event(kind,message){state.events.unshift({kind,message,time:Date.now()});state.events=state.events.slice(0,400);console.log(`[${kind}] ${message}`);}
 function today(t){return new Date(t).toISOString().slice(0,10);}
 function usedBudget(trades){const d=today(Date.now());return trades.filter(t=>today(t.timestamp)===d && ['completed','pending'].includes(t.status)).reduce((v,t)=>v+t.costEth,0);}
 function dayCount(trades){const d=today(Date.now());return trades.filter(t=>today(t.timestamp)===d && ['completed','pending'].includes(t.status)).length;}
 function safeSummary(){return {
- appVersion:LOCAL_VERSION,updateRepository:GITHUB_REPO,
+ appVersion:LOCAL_VERSION,updateRepository:GITHUB_REPO,updatePrefs:state.updatePrefs,updateStatus,
  settings:state.settings,scanning,lastScan:scannedAt,now:Date.now(),armed:liveArmed,
  hasDedicatedWallet:/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''),
  liveEnvironmentEnabled:process.env.HABBO_ENABLE_LIVE_BUYS==='YES',warnings,stats,
@@ -103,6 +105,68 @@ async function scan(){if(scanning||updating)return;scanning=true;
  finally{scanning=false;}
 }
 function schedule(){if(serverTimer)clearInterval(serverTimer);serverTimer=setInterval(()=>{scan().catch(e=>event('error',String(e)));},state.settings.refreshSeconds*1000);}
+// GitHub release auto-updates (Windows only). Never run while a scan or live buy is in flight.
+// The verified ZIP installer replaces code but preserves .env and data/state.json.
+function markUpdate(phase,message,extra={}){
+ updateStatus={phase,message,lastCheckedAt:updateStatus.lastCheckedAt,availableVersion:updateStatus.availableVersion,...extra};
+}
+function beginRestart(version){
+ liveArmed=false;
+ markUpdate('installing',`Installing v${version}; application will restart.`,{availableVersion:version});
+ event('system',`Verified GitHub update v${version} downloaded; closing Market Radar to install.`);
+ save();
+ setTimeout(()=>{
+  if(serverTimer)clearInterval(serverTimer);
+  if(autoUpdateTimer)clearInterval(autoUpdateTimer);
+  server.close(()=>process.exit(0));
+  // Prevent an open browser connection from holding the old server process alive forever.
+  setTimeout(()=>process.exit(0),4500).unref();
+ },400).unref();
+}
+async function installCandidate(candidate){
+ if(!updating)throw Error('Updater lock was not acquired');
+ if(liveArmed||scanning)throw Error('Auto-update deferred: an NFT scan or live buying is active');
+ markUpdate('downloading',`Downloading and validating v${candidate.latest}.`,{availableVersion:candidate.latest});
+ const downloaded=await prepareUpdate(candidate,dataDir);
+ // Recheck before spawning the updater; a real purchase cannot be interrupted.
+ if(liveArmed||scanning)throw Error('An NFT scan or live purchase started during the update');
+ const result=await startWindowsUpdate(downloaded);
+ beginRestart(downloaded.version);
+ return result;
+}
+async function autoUpdateTick(){
+ if(!canAutoUpdate({enabled:state.updatePrefs.autoInstall,platform:process.platform,armed:liveArmed,scanning,updating,now:Date.now(),nextAttemptAt:nextAutoUpdateAttempt}))return;
+ updating=true;
+ nextAutoUpdateAttempt=Date.now()+6*60*60*1000; // Up-to-date: check again every 6 hours.
+ markUpdate('checking','Checking GitHub for automatic updates.');
+ let installing=false;
+ try{
+  const candidate=await checkForUpdates();
+  lastCheckedUpdate=candidate;
+  markUpdate(candidate.available?'available':'current',candidate.available?`Found v${candidate.latest}; installing automatically.`:`Up to date (v${LOCAL_VERSION}).`,{lastCheckedAt:Date.now(),availableVersion:candidate.available?candidate.latest:null});
+  if(candidate.available){
+   await installCandidate(candidate);
+   installing=true;
+  }
+ }catch(err){
+  nextAutoUpdateAttempt=Date.now()+15*60*1000; // Retry failed downloads; do not retry in a tight loop.
+  markUpdate('error',`Automatic update failed: ${String(err?.message??err).slice(0,240)}`);
+  event('error',updateStatus.message);
+ }finally{if(!installing)updating=false;}
+}
+function scheduleAutoUpdates(){
+ if(autoUpdateTimer)clearInterval(autoUpdateTimer);
+ if(process.platform!=='win32'){
+  markUpdate('unsupported','Automatic installation is available on Windows only.');
+  return;
+ }
+ if(!state.updatePrefs.autoInstall){markUpdate('disabled','Automatic updates are turned off.');return;}
+ markUpdate('scheduled','Automatic updates are ON. Checking at startup and every 6 hours.');
+ autoUpdateTimer=setInterval(()=>{void autoUpdateTick();},60*1000);
+ // Let first market initialization proceed, then check. Busy scans defer to next tick.
+ setTimeout(()=>{void autoUpdateTick();},12000).unref();
+}
+
 function send(res,status,data,contentType='application/json; charset=utf-8'){
  const buf=typeof data==='string'?data:JSON.stringify(data);
  res.writeHead(status,{'Content-Type':contentType,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Content-Security-Policy':contentType.startsWith('text/html')?"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' https: data:; connect-src 'self'; object-src 'none'; base-uri 'none'":"default-src 'none'"});res.end(buf);
@@ -132,11 +196,18 @@ const server=http.createServer(async(req,res)=>{
    const csv=header+displayRows.map(r=>[r.collection,r.name,r.tokenId,r.price,r.reference,r.discount,r.netEdge,r.sales30d,r.eligible,r.id].map(quote).join(',')).join('\n');
    return send(res,200,csv,'text/csv; charset=utf-8');
   }
-  if(req.method!=='POST'||!['/api/settings','/api/refresh','/api/arm','/api/disarm','/api/reset-paper','/api/update/install'].includes(uri.pathname))return send(res,404,{error:'Not found'});
+  if(req.method!=='POST'||!['/api/settings','/api/refresh','/api/arm','/api/disarm','/api/reset-paper','/api/update/install','/api/update/preferences'].includes(uri.pathname))return send(res,404,{error:'Not found'});
   // Local-only API; prevent another browser tab/site from posting by cross-site fetch/forms.
   const origin=req.headers.origin;if(origin&&origin!==`http://127.0.0.1:${PORT}`&&origin!==`http://localhost:${PORT}`)return send(res,403,{error:'Invalid origin'});
   if(req.headers['content-type']?.split(';')[0]!=='application/json')return send(res,415,{error:'Use application/json'});
   const body=await jsonBody(req);
+  if(uri.pathname==='/api/update/preferences'){
+   if(updating)return send(res,409,{error:'Update installation is in progress.'});
+   if(typeof body.autoInstall!=='boolean')return send(res,400,{error:'autoInstall must be true or false.'});
+   state.updatePrefs.autoInstall=body.autoInstall;save();
+   nextAutoUpdateAttempt=0;scheduleAutoUpdates();
+   return send(res,200,{ok:true,updatePrefs:state.updatePrefs,updateStatus});
+  }
   if(uri.pathname==='/api/update/install'){
    if(process.platform!=='win32')return send(res,400,{error:'Update installation is currently Windows-only.'});
    if(liveArmed)return send(res,409,{error:'Disarm real-money autobuying before updating.'});
@@ -149,13 +220,9 @@ const server=http.createServer(async(req,res)=>{
     const candidate=await checkForUpdates();
     if(!candidate.available)throw Error('No newer published release found.');
     if(lastCheckedUpdate?.latest!==candidate.latest)throw Error('Release changed since your last check. Check updates again first.');
-    const downloaded=await prepareUpdate(candidate,dataDir);
-    const result=await startWindowsUpdate(downloaded);
-    liveArmed=false;event('system',`Installing verified update v${downloaded.version}; shutting down the scanner.`);
-    send(res,200,result);
-    setTimeout(()=>{if(serverTimer)clearInterval(serverTimer);save();server.close(()=>process.exit(0));},400);
-    return;
-   } catch(err) {updating=false;return send(res,400,{error:String(err.message||err)});}
+    const result=await installCandidate(candidate);
+    return send(res,200,result);
+   } catch(err) {updating=false;markUpdate('error',`Update failed: ${String(err?.message??err)}`);return send(res,400,{error:String(err.message||err)});}
   }
   if(uri.pathname==='/api/settings'){
    if(updating)return send(res,409,{error:'Update installation is in progress.'});
@@ -180,5 +247,5 @@ const server=http.createServer(async(req,res)=>{
   }
  }catch(e){return send(res,400,{error:String(e?.message??e)});}
 });
-server.listen(PORT,'127.0.0.1',()=>{console.log(`\nHabbo NFT Market Radar: http://127.0.0.1:${PORT}\n`);schedule();void scan();});
+server.listen(PORT,'127.0.0.1',()=>{console.log(`\nHabbo NFT Market Radar: http://127.0.0.1:${PORT}\n`);schedule();scheduleAutoUpdates();void scan();});
 process.on('SIGINT',()=>{liveArmed=false;save();server.close(()=>process.exit(0));});
