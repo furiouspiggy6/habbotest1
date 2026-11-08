@@ -292,3 +292,11 @@ Under **Strategy & Settings → Additional NFT marketplaces**, OpenSea now has a
 - **NO KEY SAVED / NOT VERIFIED / CHECKING**: setup or verification is incomplete.
 
 The indicator shows the time of its most recent result. Normal OpenSea scans refresh the key status automatically; manual testing is limited to one single-page read and has a short anti-spam cooldown. This test verifies present access, **not the future expiration date** of an instant seven-day API key. The API key is never included in the dashboard state or test response; it remains in local settings. OpenSea remains watch-only and cannot initiate Immutable purchases.
+
+## v2.0.18: rate-limit-aware metadata indexing and archived-sale recovery
+
+The Immutable scanner still fetches fresh ACTIVE listings for every scan and retains real offers from successfully fetched pages when a later page fails. The update makes authenticated read-only requests less bursty, honors reasonable Retry-After delays on HTTP 429, and stops optional metadata lookups for the remainder of a scan after a quota error. Rate-limited tokens are not incorrectly marked as malformed for ten minutes; they can be retried on a later scheduled scan. Separate 500-series upstream failures may still occur.
+
+Missing collectible identities from **previously cached FILLED sales** are included in the bounded metadata resolution queue alongside new FILLED orders. This makes existing historical data more useful over successive refreshes without treating an older listing as live or relaxing purchase, discount, profit or sales-volume requirements.
+
+The default ACTIVE page depth remains 20 per collection (user-configurable up to 40). A cap hit remains clearly labelled **PARTIAL coverage**. Increasing scan depth while seeing HTTP 429 errors can make throttling worse: prioritize reducing API pressure and allowing the historical metadata queue to catch up before increasing it. No real-money trade execution logic is changed.
