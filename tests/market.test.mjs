@@ -202,3 +202,44 @@ test('Immutable repeated timeout reports useful error after bounded retries',asy
  await assert.rejects(()=>client.orderbook.listListings({sellItemContractAddress:col.address,status:'ACTIVE',pageSize:50}),/Request timed out after retry/);
  assert.equal(calls,2);
 });
+
+test('cached previous-sale history resolves missing identities without treating old listings as active',async()=>{
+ const {scanMarket}=await import('../market.mjs');
+ const {DEFAULT_SETTINGS}=await import('../core.mjs');
+ const cache={[col.address+'|12']:{name:'Active Furni'}};
+ const archive=[{contract:col.address,tokenId:'987654',timestamp:Date.now(),id:'older-sale'}];
+ const calls=[];
+ const clients={
+  orderbook:{listListings:async request=>({result:request.status==='ACTIVE'?[order('active')]:[],page:{}})},
+  blockchainData:{getNFT:async request=>{
+   calls.push(request.tokenId);
+   return {result:{metadata:{name:'Archived item'},metadata_id:'archived-stack'}};
+  }}
+ };
+ const settings={...DEFAULT_SETTINGS,pagesPerCollection:1,collections:DEFAULT_SETTINGS.collections.map(c=>({...c,enabled:c.address===col.address}))};
+ const result=await scanMarket(settings,cache,{},clients,archive);
+ assert.deepEqual(result.listings.map(x=>x.id),['active']);
+ assert.deepEqual(calls,['987654']);
+ assert.equal(cache[col.address+'|987654'].name,'Archived item');
+ assert.equal(result.meta.ok,1);
+});
+test('metadata quota error halts further attempts and does not ten-minute blacklist tokens',async()=>{
+ const cache={},calls=[];
+ const batch=Array.from({length:12},(_,i)=>({contract:col.address,tokenId:String(900000+i),timestamp:Date.now()}));
+ const client={getNFT:async ({tokenId})=>{calls.push(tokenId);throw Error('Immutable HTTP 429: Rate limited');}};
+ const result=await resolveMetadata(client,batch,cache,12);
+ assert.equal(result.rateLimited,true);
+ assert.ok(result.attempted<=2);
+ assert.equal(result.failed,result.attempted);
+ assert.equal(result.ok,0);
+ assert.equal(prioritizedMetadataOrders([],batch,cache,12).length,12);
+});
+test('long Retry-After on Immutable 429 does not trigger an early retry',async()=>{
+ let calls=0;
+ const client=createReadClients('',async()=>{
+  calls++;
+  return new Response(JSON.stringify({message:'Slow down'}),{status:429,headers:{'Retry-After':'30'}});
+ });
+ await assert.rejects(()=>client.orderbook.listListings({sellItemContractAddress:col.address,status:'ACTIVE',pageSize:50}),/HTTP 429/);
+ assert.equal(calls,1);
+});
