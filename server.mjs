@@ -24,7 +24,7 @@ let lastCheckedUpdate=null;
 let updating=false;
 let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
 let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
-let liveArmed=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
+let liveArmed=false,liveBuyInFlight=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
 let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[],coverage:null,candidateDiagnostics:null};
 function save(){const output={schemaVersion:8,settings:state.settings,updatePrefs:state.updatePrefs,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
  const tmp=storePath+'.tmp';fs.writeFileSync(tmp,JSON.stringify(output,null,2));fs.renameSync(tmp,storePath);}
@@ -59,13 +59,17 @@ async function doAutoTrades(){
   if(!target)return;
   const attempt={timestamp:Date.now(),orderId:target.id,name:target.name,collection:target.collection,
     costEth:target.totalWithFeesEth,fairValueEth:target.reference,discount:target.discount,status:'pending',mode:'live'};
-  state.liveTrades.push(attempt);save();event('live',`Trying LIVE purchase: ${target.name}`);
-  try {const result=await executeLiveBuy(target,state.settings,process.env.HABBO_BOT_PRIVATE_KEY);
+  // Do not shut down for an updater while any wallet transaction is in flight,
+  // even if the user disarms buying after that transaction was submitted.
+  liveBuyInFlight=true;
+  try {
+   state.liveTrades.push(attempt);save();event('live',`Trying LIVE purchase: ${target.name}`);
+   const result=await executeLiveBuy(target,state.settings,process.env.HABBO_BOT_PRIVATE_KEY);
    attempt.status='completed';attempt.hash=result.hash;attempt.costEth=result.priceEth;
    event('success',`LIVE purchase confirmed ${target.name} — ${result.hash}`);
   }catch(error){attempt.status='failed';attempt.error=String(error?.message??error).slice(0,280);
    liveArmed=false;event('error',`LIVE attempt failed; buying DISARMED: ${attempt.error}`);
-  }save();
+  }finally{liveBuyInFlight=false;save();}
  }
 }
 async function scan(){if(scanning||updating)return;scanning=true;
@@ -168,18 +172,19 @@ function scheduleAutoUpdates(){
  setTimeout(()=>{void autoUpdateTick();},12000).unref();
 }
 
-// Native Electron updater: stop new scans, finish the current one, never interrupt armed buying.
+// Native desktop updates can safely interrupt READ-ONLY HTTP scans. Keep the
+// last completed scan in storage; never interrupt an armed or in-flight wallet buy.
+// Waiting for hundreds of Immutable API pages used to block updates for 10+ minutes.
 export async function pauseForDesktopUpdate(){
- if(liveArmed||updating)return false;
- updating=true;
- const deadline=Date.now()+180000;
- while(scanning && Date.now()<deadline){
-  if(liveArmed){updating=false;return false;}
-  await new Promise(resolve=>setTimeout(resolve,250));
- }
- if(scanning||liveArmed){updating=false;return false;}
- event('system','Native desktop update ready; installing and restarting.');save();
- return true;
+ if(liveArmed||liveBuyInFlight||updating)return false;
+ updating=true; // No new scans or buys can start once the update is ready.
+ try{
+  event('system',scanning
+   ?'Desktop update ready: closing the read-only market scan; last completed results preserved.'
+   :'Desktop update ready: installing and restarting.');
+  save();
+  return true;
+ }catch(err){updating=false;throw err;}
 }
 export function resumeAfterDesktopUpdate(){updating=false;}
 
