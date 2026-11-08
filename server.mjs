@@ -249,9 +249,11 @@ const server=http.createServer(async(req,res)=>{
    return send(res,200,{key,candles:candles(chartHistory,key),sales:chartHistory.filter(x=>x.key===key).slice(-180).map(({price,timestamp,id})=>({price,timestamp,id}))});
   }
   if(req.method==='GET'&&uri.pathname==='/api/export.csv'){
-   const header='collection,name,token_id,price_weth,median_weth,discount_pct,net_edge_pct,sales_30d,eligible,order_id\n';
+   const header='collection,name,token_id,price_aud,median_aud,total_cost_aud,discount_pct,net_edge_pct,sales_30d,eligible,order_id,eth_aud_rate,conversion_time\n';
    const quote=x=>'"'+String(x??'').replaceAll('"','""')+'"';
-   const csv=header+displayRows.map(r=>[r.collection,r.name,r.tokenId,r.price,r.reference,r.discount,r.netEdge,r.sales30d,r.eligible,r.id].map(quote).join(',')).join('\n');
+   const rate=fiatMinimumStatus({...state.settings,fiatCurrency:'AUD'},fiatRates);
+   const aud=x=>rate.available&&x!==null&&x!==undefined&&Number.isFinite(Number(x))?(Number(x)*rate.spot).toFixed(4):'';
+   const csv=header+displayRows.map(row=>[row.collection,row.name,row.tokenId,aud(row.price),aud(row.reference),aud(row.totalWithFeesEth),row.discount,row.netEdge,row.sales30d,row.eligible,row.id,rate.available?rate.spot:'',rate.available?new Date(rate.fetchedAt).toISOString():''].map(quote).join(',')).join('\n');
    return send(res,200,csv,'text/csv; charset=utf-8');
   }
   if(req.method!=='POST'||!['/api/settings','/api/refresh','/api/arm','/api/disarm','/api/update/install','/api/update/preferences'].includes(uri.pathname))return send(res,404,{error:'Not found'});
