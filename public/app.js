@@ -193,8 +193,13 @@ $('installUpdateBtn').addEventListener('click',async()=>{
 
 if(window.marketRadarDesktop){
  $('installUpdateBtn').hidden=true;
+ $('nativeFallbackBtn').addEventListener('click',async()=>{
+  try{await window.marketRadarDesktop.openLatestInstaller();}
+  catch(err){toast('Could not open the official installer: '+err.message,true);}
+ });
  window.marketRadarDesktop.onUpdateStatus(info=>{
   $('updateDetails').textContent=info.message||'Desktop auto-updater ready.';
+  $('nativeFallbackBtn').hidden=info.phase!=='manual-update';
   if(info.phase==='downloading'||info.phase==='installing'||info.phase==='waiting')$('checkUpdateBtn').disabled=true;
   else $('checkUpdateBtn').disabled=false;
  });
