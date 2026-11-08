@@ -16,17 +16,17 @@ function dotenv(){try{for(const line of fs.readFileSync(path.join(HERE,'.env'),'
 dotenv();
 function readState(){try{const old=JSON.parse(fs.readFileSync(storePath,'utf8'));
  const nextSettings=upgradeLegacyScanCoverage(old.settings,old.schemaVersion??0);
- return {settings:nextSettings,updatePrefs:{autoInstall:old.updatePrefs?.autoInstall!==false},metadata:old.metadata??{},historicalSales:(old.historicalSales??[]).filter(x=>!String(x?.id??'').startsWith('demo-') && !String(x?.name??'').includes(' · sample')),
+ return {settings:nextSettings,updatePrefs:{autoInstall:old.updatePrefs?.autoInstall!==false},metadata:old.metadata??{},scanProgress:Object.fromEntries(Object.entries(old.scanProgress??{}).filter(([k,v])=>/^0x[a-f0-9]{40}:FILLED$/.test(k) && (v===null||(typeof v==='string'&&v.length<4096)))),historicalSales:(old.historicalSales??[]).filter(x=>!String(x?.id??'').startsWith('demo-') && !String(x?.name??'').includes(' · sample')),
  liveTrades:old.liveTrades??[],events:old.events??[]};
- }catch{return {settings:validateSettings(DEFAULT_SETTINGS),updatePrefs:{autoInstall:true},metadata:{},historicalSales:[],liveTrades:[],events:[]};}}
+ }catch{return {settings:validateSettings(DEFAULT_SETTINGS),updatePrefs:{autoInstall:true},metadata:{},scanProgress:{},historicalSales:[],liveTrades:[],events:[]};}}
 const state=readState();
 let lastCheckedUpdate=null;
 let updating=false;
 let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
 let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
 let liveArmed=false,liveBuyInFlight=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
-let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[],coverage:null,candidateDiagnostics:null};
-function save(){const output={schemaVersion:8,settings:state.settings,updatePrefs:state.updatePrefs,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
+let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[],coverage:null,candidateDiagnostics:null,historyPending:0,historyCompleted:0};
+function save(){const output={schemaVersion:9,settings:state.settings,updatePrefs:state.updatePrefs,metadata:state.metadata,scanProgress:state.scanProgress,historicalSales:state.historicalSales.slice(-16000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
  const tmp=storePath+'.tmp';fs.writeFileSync(tmp,JSON.stringify(output,null,2));fs.renameSync(tmp,storePath);}
 function event(kind,message){state.events.unshift({kind,message,time:Date.now()});state.events=state.events.slice(0,400);console.log(`[${kind}] ${message}`);}
 function today(t){return new Date(t).toISOString().slice(0,10);}
@@ -74,10 +74,10 @@ async function doAutoTrades(){
 }
 async function scan(){if(scanning||updating)return;scanning=true;
  try {
-  const r=await scanMarket(state.settings,state.metadata);
+  const r=await scanMarket(state.settings,state.metadata,state.scanProgress);
   const {listings,filled}=r;
   warnings=r.warnings;
-  stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics,coverage:r.coverage,candidateDiagnostics:null};
+  stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics,coverage:r.coverage,candidateDiagnostics:null,historyPending:r.historyPending,historyCompleted:r.historyCompleted};
   if(r.truncated)warnings.unshift('PARTIAL COVERAGE: not every listing or past sale was downloaded; signals are based on a limited sample of REAL trades.');
   // Refresh historical records as metadata arrives. Earlier versions persisted
   // unresolved FILLED orders permanently, even when subsequent scans found identity.
@@ -92,10 +92,11 @@ async function scan(){if(scanning||updating)return;scanning=true;
   activeListings=listings;
   displayRows=analyze(listings,chartSales,state.settings);
   stats.candidateDiagnostics=candidateDiagnostics(displayRows,state.settings);
+  stats.historicalSales=state.historicalSales.length;
   scannedAt=Date.now();
   if(stats.sales===0)warnings.push('No completed sale records in this response; trades require credible local sales history.');
   await doAutoTrades();save();event('scan',`LIVE: ${listings.length} real listings, ${filled.length} completed orders, ${displayRows.filter(x=>x.eligible).length} candidates.`);
- }catch(e){liveArmed=false;displayRows=[];activeListings=[];scannedAt=0;stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:1,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[],coverage:null,candidateDiagnostics:null};warnings=[`Live scan failed: ${String(e?.message??e)}`];event('error',warnings[0]);}
+ }catch(e){liveArmed=false;displayRows=[];activeListings=[];scannedAt=0;stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:1,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[],coverage:null,candidateDiagnostics:null,historyPending:0,historyCompleted:0};warnings=[`Live scan failed: ${String(e?.message??e)}`];event('error',warnings[0]);}
  finally{scanning=false;}
 }
 function schedule(){if(serverTimer)clearInterval(serverTimer);serverTimer=setInterval(()=>{scan().catch(e=>event('error',String(e)));},state.settings.refreshSeconds*1000);}
