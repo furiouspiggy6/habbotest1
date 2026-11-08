@@ -87,7 +87,18 @@ function renderBanner(){
  b.querySelector('b').textContent=title;b.querySelector('span:not(.banner-icon)').textContent=copy;
  $('connectionPill').innerHTML='<span class="pulse-dot"></span> '+(data.scanning?'SCANNING':hasListings?'LIVE LISTINGS':connected?'CONNECTED · EMPTY':'LIVE OFFLINE');
 }
-function renderStats(){$('statListings').textContent=data.listingCount??0;$('statOpportunities').textContent=data.candidateCount??0;
+function renderStats(){
+ const bot=data?.autoDecision??{ready:0,watched:0,passed:0,bidsObserved:0,best:null};
+ $('autoDecisionHeadline').textContent=bot.ready>0?
+  bot.ready+' BUY READY · bot already selected the strongest opportunities':
+  'NO SAFE BUY RIGHT NOW · automated monitoring continues';
+ $('autoDecisionDetails').textContent=bot.ready>0
+  ?(bot.best?.name||'Best candidate')+' · conservative estimated profit '+audLimit(bot.best?.profitAud)+
+    ' · '+bot.watched+' other(s) automatically watched · '+bot.bidsObserved+' direct-token bid(s) matched. '+
+    (data.armed?'Live autobuyer is armed and will perform its safety checks.':'Purchases remain disabled until you arm the wallet autobuyer.')
+  :bot.watched+' NFT(s) on automatic watch · '+bot.passed+' rejected/insufficient evidence · '+
+   bot.bidsObserved+' matched direct-token bid(s). The bot keeps scanning automatically; you do not need to inspect listings.';
+ $('statListings').textContent=data.listingCount??0;$('statOpportunities').textContent=data.candidateCount??0;
  $('statSales').textContent=data.stats?.historicalSales??data.stats?.sales??0;$('statSpend').textContent=audLimit(data.liveSpentTodayAud);
  $('riskLimit').textContent=audLimit(data.audLimits?.maximumPriceAud);$('riskDiscount').textContent=data.settings.minDiscountPct+'%';
  if($('fiatRateText')){
@@ -103,8 +114,8 @@ function renderStats(){$('statListings').textContent=data.listingCount??0;$('sta
  const cv=data.stats.coverage,cd=data.stats.candidateDiagnostics;
  const coverage=cv?`Verified NFT identity: ${cv.activeResolved}/${cv.activeTotal} active · ${cv.salesResolved}/${cv.salesTotal} sold · ${cv.fetchedThisScan} resolved this scan, ${cv.failedThisScan} failed.`:'Metadata coverage not available yet.';
  const historyLine=`Historical sales: ${data.stats.historyPending??0} collection(s) still indexing older pages; ${data.stats.historyCompleted??0} reached the end this scan. ${data.stats.historicalSales??0} unique sales cached locally.`;
- const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.noComparableCurrentAsk??0} without a competing current ask; ${cd.belowConservativeDiscount??0} below conservative resale discount; ${cd.belowEstimatedProfit??0} below A$ profit minimum; ${cd.cheaperComparableOffer??0} cheaper competing comparable offer; ${cd.belowOpportunityScore??0} below optional opportunity score; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
- $('scanDiagnostics').textContent=([`Immutable scan segments: ${data.stats.successfulRequests??0} completed / ${data.stats.failedRequests??0} failed or interrupted. ${data.stats.rawOrders??0} raw orders received.`,coverage,historyLine,reasons,...data.warnings,`Rejected orders: ${JSON.stringify(data.stats.rejected||{})}`, ...((data.stats.diagnostics||[]).map(d=>`${d.collection} ${d.status}: ${d.error||`${d.accepted}/${d.raw} accepted (${d.pages} pages)${d.shape?' shape='+JSON.stringify(d.shape):''}`}`))].join('\n')); 
+ const reasons=cd?`Automatic decision diagnostics (first rejected criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.noComparableCurrentAsk??0} without a competing current ask; ${cd.belowConservativeDiscount??0} below conservative resale discount; ${cd.belowEstimatedProfit??0} below A$ profit minimum; ${cd.cheaperComparableOffer??0} cheaper competing comparable offer; ${cd.belowOpportunityScore??0} below optional opportunity score; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
+ $('scanDiagnostics').textContent=([`Immutable scan segments: ${data.stats.successfulRequests??0} completed / ${data.stats.failedRequests??0} failed or interrupted. ${data.stats.rawOrders??0} raw orders received.`,coverage,historyLine,reasons,...data.warnings,`Direct bids: ${data.stats?.bids??0} valid exact-token orders; ${JSON.stringify(data.stats?.bidDiagnostics??[])}`,`Rejected orders: ${JSON.stringify(data.stats.rejected||{})}`, ...((data.stats.diagnostics||[]).map(d=>`${d.collection} ${d.status}: ${d.error||`${d.accepted}/${d.raw} accepted (${d.pages} pages)${d.shape?' shape='+JSON.stringify(d.shape):''}`}`))].join('\n')); 
 }
 function withinAudRange(row){
  const spot=audSpot(),limits=data?.audLimits,settings=data?.settings;
@@ -118,7 +129,8 @@ function withinAudRange(row){
 function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),collection=$('collectionFilter').value,signal=$('signalFilter').value;
  const minimumProfit=Number(data?.settings?.minEstimatedProfitAud??0);
  const matched=(data?.rows??[]).filter(x=>(!text||(`${x.name} ${x.tokenId} ${x.collection}`).toLowerCase().includes(text))&&(!collection||x.collection===collection)&&
-  (signal==='all'||(signal==='eligible'?x.eligible:withinAudRange(x)))&&
+  (signal==='all'||(signal==='eligible'?x.eligible:signal==='auto'?
+   withinAudRange(x)&&['BUY READY','AUTO WATCH'].includes(x.autoDecision):withinAudRange(x)))&&
   (!$('profitOnly').checked||minimumProfit<=0||
    (Number.isFinite(Number(x.estimatedProfitAud))&&x.estimatedProfitAud!==null&&x.estimatedProfitAud!==undefined&&x.estimatedProfitAud+1e-8>=minimumProfit)));
  if($('profitOnly').checked&&minimumProfit>0)matched.sort((a,b)=>Number(b.eligible===true)-Number(a.eligible===true)||(b.opportunityScore??-1)-(a.opportunityScore??-1)||(b.estimatedProfitAud??-1e12)-(a.estimatedProfitAud??-1e12));
@@ -137,7 +149,7 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
  $('pageSummary').textContent=found.length?`Showing ${start+1}–${start+limited.length} of ${found.length} · Page ${pageIndex+1}/${totalPages}`:'No matching listings';
  $('pagePrev').disabled=pageIndex===0;
  $('pageNext').disabled=pageIndex>=totalPages-1;
- body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.totalWithFeesEth)}</td><td class="${r.estimatedProfitAud!==null&&r.estimatedProfitAud>=0?'positive':'neutral'}">${r.estimatedProfitAud===null||r.estimatedProfitAud===undefined?'—':audLimit(r.estimatedProfitAud)}</td><td><span class="opportunity-score ${r.opportunityScore!==null&&r.opportunityScore>=70?'strong':''}" title="${htmlSafe((r.scoreCautions||[]).join(' | ')||'Heuristic score, not a resale guarantee')}">${r.opportunityScore===null?'—':r.opportunityScore+'/100'}</span><small class="score-confidence">${htmlSafe((r.confidence||'low').toUpperCase())} confidence</small></td><td>${audCash(r.conservativeResaleEth)}</td><td class="${r.conservativeDiscountPct>=0?'positive':'neutral'}">${r.conservativeDiscountPct==null?'—':(r.conservativeDiscountPct>0?'-':'')+percent(Math.abs(r.conservativeDiscountPct))}</td><td>${r.sales30d}</td><td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td><td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
+ body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.totalWithFeesEth)}</td><td class="${r.estimatedProfitAud!==null&&r.estimatedProfitAud>=0?'positive':'neutral'}">${r.estimatedProfitAud===null||r.estimatedProfitAud===undefined?'—':audLimit(r.estimatedProfitAud)}</td><td><span class="opportunity-score ${r.opportunityScore!==null&&r.opportunityScore>=70?'strong':''}" title="${htmlSafe((r.scoreCautions||[]).join(' | ')||'Heuristic score, not a resale guarantee')}">${r.opportunityScore===null?'—':r.opportunityScore+'/100'}</span><small class="score-confidence">${htmlSafe((r.confidence||'low').toUpperCase())} confidence</small></td><td>${audCash(r.conservativeResaleEth)}</td><td class="${r.conservativeDiscountPct>=0?'positive':'neutral'}">${r.conservativeDiscountPct==null?'—':(r.conservativeDiscountPct>0?'-':'')+percent(Math.abs(r.conservativeDiscountPct))}</td><td>${r.sales30d}</td><td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td><td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td><td><span class="signal ${r.eligible?'buy':''}">${htmlSafe(r.autoDecision??(r.eligible?'BUY READY':'PASS'))}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
  body.querySelectorAll('tr').forEach(tr=>tr.addEventListener('click',()=>{selectedId=tr.dataset.order;renderMarket();void loadChart(true);}));
  body.querySelectorAll('.row-inspect').forEach(btn=>btn.addEventListener('click',event=>{
   event.stopPropagation();selectedId=btn.dataset.inspectOrder;
@@ -150,7 +162,10 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
   if(!Number(data?.listingCount)){
    heading.textContent='No live NFT listings received yet.';
    help.textContent='Check the Immutable connection diagnostics, then refresh.';
-  }else if(signal==='eligible'){
+  }else if(signal==='auto'){
+    heading.textContent='No buy-ready or positive-watch deals in your spending range.';
+    help.textContent='Automated market analysis is working. The bot will keep checking live bids, sales and competing asks on each refresh; no manual research is needed. Zero qualifying buys is a valid result.';
+   }else if(signal==='eligible'){
    heading.textContent='No NFTs currently qualify as buying candidates.';
    help.textContent=`${data.listingCount} real listings were scanned, but none passed all of your buying rules. Select “Within my price range” to see affordable listings that are still on watch.`;
   }else if(signal==='range'&&!audSpot()){
@@ -222,7 +237,7 @@ function renderInspection(info){
   (r.estimatedFiatCost+Number(r.estimatedExtraCostsAud??0))/(1-Number(estimate.resaleFeePct)/100):null;
  const estimateProfit=estimate.estimatedProfitEth;
  const profitClass=estimateProfit===null?'':estimateProfit>=0?'good':'bad';
- const qualified=r.eligible?'● BUY-QUALIFIED CANDIDATE':'● WATCH / NOT QUALIFIED';
+ const qualified=r.autoDecision==='BUY READY'?'● BUY READY':r.autoDecision==='AUTO WATCH'?'● AUTO WATCH':'● PASS / NOT PROFITABLE';
  $('inspectStatus').textContent='';
  $('inspectContent').innerHTML=`
   <div class="inspect-intro">${img}<div><h3>${htmlSafe(r.name)}</h3><small>${htmlSafe(r.collection)} · ${htmlSafe(r.tokenType||'NFT')} · Token #${htmlSafe(r.tokenId)}</small><div><span class="inspect-signal ${r.eligible?'':'watch'}">${qualified}</span></div></div></div>
@@ -234,6 +249,7 @@ function renderInspection(info){
    ${metric('Estimated net profit (after extra costs)',r.estimatedProfitAud===null?'—':audLimit(r.estimatedProfitAud),r.estimatedProfitAud>=0?'good':'bad')}
    ${metric('Opportunity score',r.opportunityScore===null?'—':r.opportunityScore+'/100')}
    ${metric('Liquidity / confidence',String(r.liquidity||'low').toUpperCase()+' / '+String(r.confidence||'low').toUpperCase())}
+   ${metric('Bot decision',r.autoDecision||'PASS')}
   </div>
   <div class="inspect-rows">
    ${inspectPair('Quantity',String(r.quantity))}
@@ -269,7 +285,10 @@ function renderInspection(info){
     ${inspectPair('Observed competing active offers',String(Math.max(0,(r.observedActiveOffers??1)-1)))}
     ${inspectPair('Observed cheaper competing offers',String(r.observedCheaperOffers??0))}
     ${inspectPair('7D median vs 30D median',r.trendPct===null?'Insufficient recent sales':inspectPct(r.trendPct))}
-    ${inspectPair('Verified live buy-offer depth','Unavailable — not integrated')}
+    ${inspectPair('Highest matched exact-token Immutable bid',r.highestDirectBidEth===null?'No direct token bid observed':inspectPrice(r.highestDirectBidEth))}
+    ${inspectPair('Indicative direct-bid exit P&L (AUD)',r.bidExitProfitAud===null?'Unavailable':audLimit(r.bidExitProfitAud))}
+    ${inspectPair('Bot decision reason',r.autoDecisionReason||'Not available')}
+    ${inspectPair('Direct bid exit limitations','Bid can expire or lose funds; selling automatically is not implemented')}
    ${inspectPair('Est. resale proceeds after fee',inspectPrice(estimate.expectedProceedsEth))}
    ${inspectPair('Est. return on purchase cost',inspectPct(estimate.estimatedRoiPct))}
    ${inspectPair('Completed comparable sales in 30D',String(h.count30d))}
