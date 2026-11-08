@@ -103,7 +103,7 @@ function renderStats(){$('statListings').textContent=data.listingCount??0;$('sta
  const cv=data.stats.coverage,cd=data.stats.candidateDiagnostics;
  const coverage=cv?`Verified NFT identity: ${cv.activeResolved}/${cv.activeTotal} active · ${cv.salesResolved}/${cv.salesTotal} sold · ${cv.fetchedThisScan} resolved this scan, ${cv.failedThisScan} failed.`:'Metadata coverage not available yet.';
  const historyLine=`Historical sales: ${data.stats.historyPending??0} collection(s) still indexing older pages; ${data.stats.historyCompleted??0} reached the end this scan. ${data.stats.historicalSales??0} unique sales cached locally.`;
- const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.belowEstimatedProfit??0} below A$ profit minimum; ${cd.belowOpportunityScore??0} below optional opportunity score; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
+ const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.belowEstimatedProfit??0} below A$ profit minimum; ${cd.cheaperComparableOffer??0} cheaper competing comparable offer; ${cd.belowOpportunityScore??0} below optional opportunity score; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
  $('scanDiagnostics').textContent=([`Immutable scan segments: ${data.stats.successfulRequests??0} completed / ${data.stats.failedRequests??0} failed or interrupted. ${data.stats.rawOrders??0} raw orders received.`,coverage,historyLine,reasons,...data.warnings,`Rejected orders: ${JSON.stringify(data.stats.rejected||{})}`, ...((data.stats.diagnostics||[]).map(d=>`${d.collection} ${d.status}: ${d.error||`${d.accepted}/${d.raw} accepted (${d.pages} pages)${d.shape?' shape='+JSON.stringify(d.shape):''}`}`))].join('\n')); 
 }
 function withinAudRange(row){
@@ -251,6 +251,7 @@ function renderInspection(info){
    ${inspectPair('Assumed resale fee',inspectPct(estimate.resaleFeePct))}
     ${inspectPair('Reserved extra costs (AUD)',audLimit(r.estimatedExtraCostsAud??0))}
     ${inspectPair('Optional minimum score satisfied',r.scorePassed?'Yes':'No — below your score minimum')}
+    ${inspectPair('Cheapest observed comparable offer',r.bestOfferPassed?'Yes':'No — cheaper live offer seen')}
     ${inspectPair('Verified comparable sales in 7D',String(r.verifiedSales7d??0))}
     ${inspectPair('Observed competing active offers',String(Math.max(0,(r.observedActiveOffers??1)-1)))}
     ${inspectPair('Observed cheaper competing offers',String(r.observedCheaperOffers??0))}
