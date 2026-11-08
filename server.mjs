@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {analyze,candles,DEFAULT_SETTINGS,validateSettings,demoOrders} from './core.mjs';
 import {scanMarket} from './market.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
-import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoUpdate} from './updates.mjs';
+import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
 const dataDir=path.join(HERE,'data');fs.mkdirSync(dataDir,{recursive:true});
 const storePath=path.join(dataDir,'state.json');
@@ -36,7 +36,7 @@ function today(t){return new Date(t).toISOString().slice(0,10);}
 function usedBudget(trades){const d=today(Date.now());return trades.filter(t=>today(t.timestamp)===d && ['completed','pending'].includes(t.status)).reduce((v,t)=>v+t.costEth,0);}
 function dayCount(trades){const d=today(Date.now());return trades.filter(t=>today(t.timestamp)===d && ['completed','pending'].includes(t.status)).length;}
 function safeSummary(){return {
- appVersion:LOCAL_VERSION,updateRepository:GITHUB_REPO,updatePrefs:state.updatePrefs,updateStatus,
+ appVersion:LOCAL_VERSION,installDirectory:HERE,updateRepository:GITHUB_REPO,updatePrefs:state.updatePrefs,updateStatus,
  settings:state.settings,scanning,lastScan:scannedAt,now:Date.now(),armed:liveArmed,
  hasDedicatedWallet:/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''),
  liveEnvironmentEnabled:process.env.HABBO_ENABLE_LIVE_BUYS==='YES',warnings,stats,
@@ -134,8 +134,16 @@ async function installCandidate(candidate){
  beginRestart(downloaded.version);
  return result;
 }
+async function waitForScanToFinish(){
+ // Updating locks out new scans immediately. Allow an in-progress request to
+ // finish before touching files; never interrupt a wallet transaction.
+ const deadline=Date.now()+5*60*1000;
+ while(scanning&&Date.now()<deadline){await new Promise(resolve=>setTimeout(resolve,1000));}
+ if(scanning)throw Error('A market scan did not finish within five minutes. Will retry the update later.');
+ if(liveArmed)throw Error('Real-money autobuying is armed. Update postponed until disarmed.');
+}
 async function autoUpdateTick(){
- if(!canAutoUpdate({enabled:state.updatePrefs.autoInstall,platform:process.platform,armed:liveArmed,scanning,updating,now:Date.now(),nextAttemptAt:nextAutoUpdateAttempt}))return;
+ if(!canAutoCheck({enabled:state.updatePrefs.autoInstall,platform:process.platform,armed:liveArmed,updating,now:Date.now(),nextAttemptAt:nextAutoUpdateAttempt}))return;
  updating=true;
  nextAutoUpdateAttempt=Date.now()+6*60*60*1000; // Up-to-date: check again every 6 hours.
  markUpdate('checking','Checking GitHub for automatic updates.');
@@ -145,6 +153,8 @@ async function autoUpdateTick(){
   lastCheckedUpdate=candidate;
   markUpdate(candidate.available?'available':'current',candidate.available?`Found v${candidate.latest}; installing automatically.`:`Up to date (v${LOCAL_VERSION}).`,{lastCheckedAt:Date.now(),availableVersion:candidate.available?candidate.latest:null});
   if(candidate.available){
+   markUpdate('waiting','Update found. Waiting for the current market scan to finish.',{availableVersion:candidate.latest});
+   await waitForScanToFinish();
    await installCandidate(candidate);
    installing=true;
   }
@@ -220,6 +230,8 @@ const server=http.createServer(async(req,res)=>{
     const candidate=await checkForUpdates();
     if(!candidate.available)throw Error('No newer published release found.');
     if(lastCheckedUpdate?.latest!==candidate.latest)throw Error('Release changed since your last check. Check updates again first.');
+    // User pressed Install: finish an active scan first; updating=true stops new ones.
+    await waitForScanToFinish();
     const result=await installCandidate(candidate);
     return send(res,200,result);
    } catch(err) {updating=false;markUpdate('error',`Update failed: ${String(err?.message??err)}`);return send(res,400,{error:String(err.message||err)});}
@@ -247,5 +259,19 @@ const server=http.createServer(async(req,res)=>{
   }
  }catch(e){return send(res,400,{error:String(e?.message??e)});}
 });
-server.listen(PORT,'127.0.0.1',()=>{console.log(`\nHabbo NFT Market Radar: http://127.0.0.1:${PORT}\n`);schedule();scheduleAutoUpdates();void scan();});
+server.on('error',async error=>{
+ if(error?.code==='EADDRINUSE'){
+  let previousVersion='unknown';
+  try{
+   const remote=await fetch(`http://127.0.0.1:${PORT}/api/state`,{signal:AbortSignal.timeout(2000)});
+   const state=await remote.json();previousVersion=String(state?.appVersion??'unknown');
+  }catch{}
+  console.error(`\nANOTHER MARKET RADAR IS ALREADY RUNNING on port ${PORT}.`);
+  console.error(`The running app reports version ${previousVersion}; this folder contains v${LOCAL_VERSION}.`);
+  console.error('Close the older Market Radar window before opening the updated one.');
+  console.error(`Current installation folder: ${HERE}\n`);
+ } else console.error('Market Radar could not start:',error?.message??error);
+ process.exitCode=1;
+});
+server.listen(PORT,'127.0.0.1',()=>{console.log(`\nHabbo NFT Market Radar v${LOCAL_VERSION} at http://127.0.0.1:${PORT}`);console.log(`Installation folder: ${HERE}\n`);schedule();scheduleAutoUpdates();void scan();});
 process.on('SIGINT',()=>{liveArmed=false;save();server.close(()=>process.exit(0));});
