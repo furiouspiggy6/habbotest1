@@ -71,8 +71,8 @@ export async function makeClients(key){
  if(key)cfg.publishableKey=key;
  return {orderbook:new orderbook.Orderbook({baseConfig:cfg}),blockchainData:new blockchainData.BlockchainData({baseConfig:cfg}),pkg};
 }
-export async function collectPage(client,col,status,limit){
- let cursor=null,seen=new Set(),all=[],pages=0,limited=false,received=0;
+export async function collectPage(client,col,status,limit,pageCursor=null){
+ let cursor=pageCursor,seen=new Set(),all=[],pages=0,limited=false,received=0;
  const quoteTypes=new Set(),rejections=new Map();let sampleShape=null;
  for(let i=0;i<limit;i++){
   const request={sellItemContractAddress:col.address,status,pageSize:50};
@@ -93,7 +93,7 @@ export async function collectPage(client,col,status,limit){
   await sleep(75);
  }
  if(cursor)limited=true;
- return {orders:all,limited,pages,received,quoteTypes:[...quoteTypes],rejections:Object.fromEntries(rejections),sampleShape};
+ return {orders:all,limited,nextCursor:cursor,pages,received,quoteTypes:[...quoteTypes],rejections:Object.fromEntries(rejections),sampleShape};
 }
 function metadataFromNFT(response){
  const n=unwrap(response);
@@ -143,24 +143,56 @@ export async function resolveMetadata(client,orders,cache,limit=120){
  await Promise.all(Array.from({length:Math.min(4,needed.length)},worker));
  return {cache,ok,failed,attempted:needed.length,firstError,remaining:items.filter(o=>!cache[metadataKey(o)]).length};
 }
-export async function scanMarket(settings,cache){
- const clients=createReadClients(settings.publishableKey);
+export async function scanMarket(settings,cache,progress={},clients=createReadClients(settings.publishableKey)){
  let listings=[],filled=[],warnings=[],pages=0,truncated=0,received=0,failedRequests=0,successfulRequests=0;
  const diagnostics=[];const rejected={};
- const quotes=new Set();
+ const quotes=new Set();let historyPending=0,historyCompleted=0;
+ const addResult=(result,col,status)=>{
+   pages+=result.pages;received+=result.received;
+   for(const [reason,count] of Object.entries(result.rejections))rejected[reason]=(rejected[reason]??0)+count;
+   result.quoteTypes.forEach(t=>quotes.add(t));
+   if(status==='ACTIVE')listings.push(...result.orders);else filled.push(...result.orders);
+ };
  for(const col of settings.collections.filter(c=>c.enabled)){
-  for(const status of ['ACTIVE','FILLED']){
-   try{
-    const result=await collectPage(clients.orderbook,col,status,settings.pagesPerCollection);
-    pages+=result.pages;received+=result.received;successfulRequests++;
-    for(const [reason,count] of Object.entries(result.rejections)){rejected[reason]=(rejected[reason]??0)+count;}
-    diagnostics.push({collection:col.name,status,raw:result.received,accepted:result.orders.length,pages:result.pages,filtered:result.rejections,shape:result.sampleShape});
-    result.quoteTypes.forEach(t=>quotes.add(t));
-    if(status==='ACTIVE')listings.push(...result.orders);else filled.push(...result.orders);
-    if(result.limited){truncated++;warnings.push(`${col.name} ${status}: only the first ${settings.pagesPerCollection} pages were scanned`);}
-   }catch(e){failedRequests++;const message=String(e?.message??e).slice(0,220);warnings.push(`${col.name} ${status} request failed: ${message}`);diagnostics.push({collection:col.name,status,error:message});}
-  }
+  // ACTIVE asks must be freshly fetched every scan; we never combine possibly
+  // expired orders from older scans into an executable listing feed.
+  try{
+   const active=await collectPage(clients.orderbook,col,'ACTIVE',settings.pagesPerCollection);
+   addResult(active,col,'ACTIVE');successfulRequests++;
+   diagnostics.push({collection:col.name,status:'ACTIVE',raw:active.received,accepted:active.orders.length,pages:active.pages,filtered:active.rejections,shape:active.sampleShape,hasMore:active.limited});
+   if(active.limited){truncated++;warnings.push(`${col.name} ACTIVE: more listings available after ${active.pages} pages. Increase scan depth if you need broader *current* listing coverage.`);}
+  }catch(e){failedRequests++;const message=String(e?.message??e).slice(0,220);warnings.push(`${col.name} ACTIVE request failed: ${message}`);diagnostics.push({collection:col.name,status:'ACTIVE',error:message});}
+  // A fresh first page on every scan captures new fills. Older FILLED pages are
+  // indexed incrementally using a persisted cursor, rather than starting over
+  // from page one on every refresh. Each scan uses a small bounded budget.
+  const progressKey=`${col.address.toLowerCase()}:FILLED`;
+  try{
+   const newest=await collectPage(clients.orderbook,col,'FILLED',1);
+   addResult(newest,col,'FILLED');successfulRequests++;
+   let pagesThisScan=newest.pages,accepted=newest.orders.length,raw=newest.received;
+   const prior=typeof progress?.[progressKey]==='string'&&progress[progressKey].length<4096?progress[progressKey]:null;
+   const startingCursor=prior||newest.nextCursor;
+   let more=!!startingCursor;
+   if(startingCursor && settings.pagesPerCollection>1){
+    // At most four older pages per collection per refresh, even when the user
+    // chooses a deep active scan. Limit network work while history accumulates.
+    try{
+     const older=await collectPage(clients.orderbook,col,'FILLED',Math.min(4,settings.pagesPerCollection-1),startingCursor);
+     addResult(older,col,'FILLED');successfulRequests++;
+     pagesThisScan+=older.pages;accepted+=older.orders.length;raw+=older.received;
+     more=older.limited;
+     progress[progressKey]=older.nextCursor||null;
+    }catch(e){
+     // A stale/invalidated pagination cursor must not block fresh fills forever.
+     progress[progressKey]=newest.nextCursor||null;
+     failedRequests++;warnings.push(`${col.name} FILLED history continuation failed; restarting its backfill next scan: ${String(e?.message??e).slice(0,150)}`);
+    }
+   }else progress[progressKey]=startingCursor||null;
+   if(more)historyPending++;else historyCompleted++;
+   diagnostics.push({collection:col.name,status:'FILLED',raw,accepted,pages:pagesThisScan,historyMore:more,historyBackfill:true,shape:newest.sampleShape});
+  }catch(e){failedRequests++;const message=String(e?.message??e).slice(0,220);warnings.push(`${col.name} FILLED request failed: ${message}`);diagnostics.push({collection:col.name,status:'FILLED',error:message});}
  }
+ if(historyPending)warnings.push(`Historical sale indexing continues over successive scans in ${historyPending} collection(s). Fresh sales are checked every scan; older sale pages resume from saved cursors.`);
  if(!listings.length){
   if(!successfulRequests)warnings.unshift('ALL IMMUTABLE REQUESTS FAILED: Check internet access, Node.js 24+, your Immutable Hub publishable key and the detailed errors below.');
   else if(received>0)warnings.unshift(`Immutable returned ${received} raw orders, but none passed the WETH NFT filters. Filter reasons: ${JSON.stringify(rejected).slice(0,250)}. Returned currencies: ${[...quotes].slice(0,6).join(', ')||'unknown'}.`);
@@ -176,5 +208,5 @@ export async function scanMarket(settings,cache){
  meta.remaining=remainingKeys.size;
  if(meta.remaining)warnings.push(`NFT identity indexing in progress: ${coverage.activeResolved}/${coverage.activeTotal} live listings and ${coverage.salesResolved}/${coverage.salesTotal} completed sales have verified metadata (${meta.remaining} token IDs outstanding).${meta.firstError?' Metadata API error: '+meta.firstError:''}`);
  if(filled.length===0)warnings.push('No usable completed orders retrieved. No purchase signals will be generated.');
- return {listings,filled,warnings,meta,coverage,pages,truncated,received,failedRequests,successfulRequests,quoteTypes:[...quotes],rejected,diagnostics};
+ return {listings,filled,warnings,meta,coverage,pages,truncated,historyPending,historyCompleted,received,failedRequests,successfulRequests,quoteTypes:[...quotes],rejected,diagnostics};
 }
