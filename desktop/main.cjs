@@ -96,25 +96,28 @@ async function checkForUpdates(){
     sendStatus('checking','Checking the latest published GitHub release...');
     try {latestGitHubRelease=await fetchLatestRelease(app.getVersion());}
     catch(error){githubError=String(error?.message||error).slice(0,160);}
+    // Avoid asking the generic GitHub provider to rediscover the latest version:
+    // it has returned an older manifest even while GitHub's API confirmed a new
+    // release. The GenericProvider gets latest.yml and the NSIS installer from
+    // this one explicit, versioned, official GitHub release directory.
+    if(!latestGitHubRelease){
+      sendStatus('unverified',`Could not verify the newest GitHub release: ${githubError||'Unknown error'}. No update attempted.`);
+      return;
+    }
+    if(!latestGitHubRelease.newer){
+      sendStatus('current',`Confirmed up to date (v${app.getVersion()}) against GitHub Releases.`);
+      return;
+    }
+    autoUpdater.setFeedURL({provider:'generic',url:latestGitHubRelease.feedUrl,channel:'latest'});
+    sendStatus('checking',`GitHub has v${latestGitHubRelease.version}. Checking its version-pinned Windows update manifest...`);
     const result=await autoUpdater.checkForUpdates();
-    // The native provider can return a stale manifest from a cache or CDN.
-    // Never tell the user they are current if the independent GitHub releases
-    // API says the installed version is behind, and never claim current when
-    // that independent check fails.
     if(downloadedUpdate||installingUpdate)return;
     const nativeVersion=String(result?.updateInfo?.version||'unknown');
-    if(result?.isUpdateAvailable)return; // Native download events own status.
-    if(latestGitHubRelease?.newer){
-      sendStatus('manual-update',`GitHub has v${latestGitHubRelease.version}, but the built-in updater returned ${nativeVersion}. Use the official installer to upgrade this installation once.`,{
-        latestVersion:latestGitHubRelease.version,installerUrl:latestGitHubRelease.installerUrl
+    if(result?.isUpdateAvailable&&nativeVersion===latestGitHubRelease.version)return;
+    sendStatus('manual-update',
+      `GitHub has v${latestGitHubRelease.version}, but the verified Windows update feed returned ${nativeVersion}. Use the official installer if automatic download did not start.`,{
+       latestVersion:latestGitHubRelease.version,installerUrl:latestGitHubRelease.installerUrl
       });
-    }else if(githubError){
-      sendStatus('unverified',`The built-in updater reports no new version, but GitHub could not be checked independently: ${githubError}`);
-    }else if(latestGitHubRelease){
-      sendStatus('current',`Confirmed up to date (v${app.getVersion()}) against the published GitHub release.`);
-    }else{
-      sendStatus('unverified','The desktop updater could not verify the latest release.');
-    }
   } catch(error) {
     if(latestGitHubRelease?.newer){
       sendStatus('manual-update',`GitHub has v${latestGitHubRelease.version}, but automatic updates failed: ${String(error?.message||error).slice(0,160)}. Use the official installer.`,{
@@ -154,7 +157,13 @@ function setupUpdater(){
   autoUpdater.on('update-available',info=>sendStatus('downloading',`Update v${info.version} found. Downloading in the background...`,{newVersion:info.version}));
   autoUpdater.on('update-not-available',info=>sendStatus('checking',`Native updater reports v${info?.version||'unknown'}. Verifying the latest GitHub release...`));
   autoUpdater.on('download-progress',progress=>sendStatus('downloading',`Downloading desktop update: ${Math.round(progress.percent)}%`,{percent:progress.percent}));
-  autoUpdater.on('update-downloaded',info=>{downloadedUpdate=info;void installWhenSafe();});
+  autoUpdater.on('update-downloaded',info=>{
+    if(!latestGitHubRelease?.newer||info?.version!==latestGitHubRelease.version){
+      sendStatus('error',`Refusing a mismatched update (expected v${latestGitHubRelease?.version||'unknown'}, received v${info?.version||'unknown'}).`);
+      return;
+    }
+    downloadedUpdate=info;void installWhenSafe();
+  });
   autoUpdater.on('error',error=>{
     serverControl?.resumeAfterDesktopUpdate?.();
     installingUpdate=false;
