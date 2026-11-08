@@ -181,3 +181,24 @@ test('scan warns about interrupted ACTIVE data without discarding valid pages',a
  assert.match(out.warnings.join('\n'),/Furni ACTIVE stopped after 1 pages/);
  assert.match(out.diagnostics.find(d=>d.status==='ACTIVE').error,/HTTP 503/);
 });
+
+test('Immutable timeout retries once and preserves successful result',async()=>{
+ let calls=0;
+ const client=createReadClients('',async()=>{
+  if(++calls===1){const error=new Error('The operation was aborted due to timeout');error.name='TimeoutError';throw error;}
+  return new Response(JSON.stringify({result:[order('after-retry')],page:{}}),{status:200});
+ });
+ const res=await collectPage(client.orderbook,col,'ACTIVE',1);
+ assert.equal(calls,2);
+ assert.equal(res.pageError,null);
+ assert.deepEqual(res.orders.map(o=>o.id),['after-retry']);
+});
+test('Immutable repeated timeout reports useful error after bounded retries',async()=>{
+ let calls=0;
+ const client=createReadClients('',async()=>{
+  calls++;
+  const err=new Error('The operation was aborted due to timeout');err.name='TimeoutError';throw err;
+ });
+ await assert.rejects(()=>client.orderbook.listListings({sellItemContractAddress:col.address,status:'ACTIVE',pageSize:50}),/Request timed out after retry/);
+ assert.equal(calls,2);
+});
