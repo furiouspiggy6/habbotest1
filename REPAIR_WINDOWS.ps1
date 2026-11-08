@@ -57,9 +57,25 @@ if ($Version -eq [string]$localPackage.version) {
     return
   }
   if ($existingPid) { Stop-Process -Id $existingPid -Force -ErrorAction Stop }
-  Start-Process -FilePath "$env:SystemRoot\System32\cmd.exe" -ArgumentList @('/c', ('"'+$Launcher+'"')) -WorkingDirectory $InstallDir
-  Write-Host "Restarted v$Version from $InstallDir" -ForegroundColor Green
-  return
+  # Start Node directly, not through cmd /c quoting that may fail on folders with spaces.
+  $node = (Get-Command node.exe -ErrorAction Stop).Source
+  $stdout = Join-Path $UpdateDir 'last-start.stdout.log'
+  $stderr = Join-Path $UpdateDir 'last-start.stderr.log'
+  $p = Start-Process -FilePath $node -ArgumentList @('server.mjs') -WorkingDirectory $InstallDir -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+  for ($i=0; $i -lt 25; $i++) {
+    Start-Sleep -Milliseconds 500
+    try {
+      $check = Invoke-RestMethod -Uri 'http://127.0.0.1:38571/api/state' -TimeoutSec 2
+      if ([string]$check.appVersion -eq $Version) {
+        Write-Host "Verified Market Radar v$Version is running (PID $($p.Id))." -ForegroundColor Green
+        Start-Process 'http://127.0.0.1:38571'
+        return
+      }
+    } catch {}
+    $p.Refresh()
+    if ($p.HasExited) { break }
+  }
+  throw "Market Radar failed to restart. Check $stderr, or launch START_WINDOWS.bat to see the error."
 }
 Write-Host "Retrieving v$Version directly from GitHub (no manual ZIP download)." -ForegroundColor Cyan
 $runId = [guid]::NewGuid().ToString('N')
@@ -102,7 +118,17 @@ try {
   if ($installed.version -ne $Version) {
     throw "Installer did not finish successfully. Read: $(Join-Path $UpdateDir 'last-update.log')"
   }
-  Write-Host "Market Radar has been updated to v$Version and restarted." -ForegroundColor Green
+  $confirmed = $false
+  for ($i=0; $i -lt 24; $i++) {
+    Start-Sleep -Milliseconds 500
+    try {
+      $result = Invoke-RestMethod -Uri 'http://127.0.0.1:38571/api/state' -TimeoutSec 2
+      if ([string]$result.appVersion -eq $Version) { $confirmed = $true; break }
+    } catch {}
+  }
+  if (-not $confirmed) { throw "The installer returned without a healthy v$Version API. Check $(Join-Path $UpdateDir 'last-update.log')." }
+  Write-Host "Market Radar v$Version is verified running." -ForegroundColor Green
+  Start-Process 'http://127.0.0.1:38571' 
 } finally {
   if (Test-Path $shaPath) { Remove-Item -LiteralPath $shaPath -Force -ErrorAction SilentlyContinue }
   if (Test-Path $stage) { Remove-Item -LiteralPath $stage -Recurse -Force -ErrorAction SilentlyContinue }
