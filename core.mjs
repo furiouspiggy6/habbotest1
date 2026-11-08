@@ -144,7 +144,7 @@ export function effectiveAudSettings(settings,quote,now=Date.now()){
   minPriceEth:convert('minPriceAud','minPriceEth'),
   minimumTotalPriceEth:Number(settings.minimumFiatPrice)>0?
    Number(settings.minimumFiatPrice)/(settings.fiatCurrency==='USD'?Number(quote.usd):q.spot):0,
-  minimumProfitEth:(Number(settings.minEstimatedProfitAud??0)>0?Number(settings.minEstimatedProfitAud)+Number(settings.estimatedExtraCostsAud??0):0)/q.spot},
+  minimumProfitEth:(Number(settings.minEstimatedProfitAud??0)+Number(settings.estimatedExtraCostsAud??0))/q.spot},
   available:true,spot:q.spot,required:enabled};
 }
 export function audLimitSummary(settings,quote,now=Date.now()){
@@ -176,7 +176,7 @@ export function applyFiatMinimum(rows,settings,quote,now=Date.now()){
     ?reference*qty*(1-resaleFeesPct/100)-total:null;
   const estimatedProfitBeforeExtraCostsAud=threshold.available&&estimatedProfitEth!==null?estimatedProfitEth*threshold.spot:null;
   const estimatedProfitAud=estimatedProfitBeforeExtraCostsAud===null?null:estimatedProfitBeforeExtraCostsAud-extraCostsAud;
-  const minProfitPassed=minimumProfitAud<=0||
+  const minProfitPassed=minimumProfitAud<=0&&extraCostsAud<=0||
    (estimatedProfitAud!==null&&estimatedProfitAud+1e-8>=minimumProfitAud);
   return {...row,estimatedFiatCost,fiatMinPassed,estimatedProfitEth,
    estimatedProfitBeforeExtraCostsAud,estimatedExtraCostsAud:extraCostsAud,estimatedProfitAud,minProfitPassed,eligible:row.eligible===true&&fiatMinPassed&&minProfitPassed};
