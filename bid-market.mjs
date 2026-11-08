@@ -49,7 +49,7 @@ export function addBidEvidence(rows,bids,settings,audSpot){
   const bidExitProfitAud=bid&&available&&Number.isFinite(cost)?(afterFee-cost)*spot-extra:null;
   return {...row,highestDirectBidEth:bid?.priceEth??null,directBidId:bid?.id??null,
    directBidExpiresAt:bid?.expiresAt??null,bidExitProfitAud,
-   bidOffersObserved:Boolean(bid),buyOffersVerified:Boolean(bid)};
+   bidOffersObserved:Boolean(bid),buyOffersVerified:false}; // Order is indexed, not yet proven funded/fulfillable
  });
 }
 /** Analysis is automatic and non-interactive. Eligible == existing *strict* trade gates.
