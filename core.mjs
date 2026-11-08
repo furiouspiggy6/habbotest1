@@ -12,6 +12,8 @@ export const COLLECTIONS = [
 export const DEFAULT_SETTINGS = Object.freeze({
   mode:'live', refreshSeconds:90, pagesPerCollection:20,
   minDiscountPct:25, minSales30d:3, minNetEdgePct:12, minEstimatedProfitAud:1,
+  minOpportunityScore:0, estimatedExtraCostsAud:0,
+  deepScanEnabled:false, deepScanPages:40, deepScanIntervalMinutes:30,
   estimatedResaleFeesPct:7.5, maximumPriceEth:0.015,
   minPriceEth:0.00005, minimumFiatPrice:5, fiatCurrency:'AUD', dailyBudgetEth:0.05, maxPurchasesPerDay:5,
   maximumPriceAud:null, dailyBudgetAud:null, minPriceAud:null,
@@ -142,7 +144,7 @@ export function effectiveAudSettings(settings,quote,now=Date.now()){
   minPriceEth:convert('minPriceAud','minPriceEth'),
   minimumTotalPriceEth:Number(settings.minimumFiatPrice)>0?
    Number(settings.minimumFiatPrice)/(settings.fiatCurrency==='USD'?Number(quote.usd):q.spot):0,
-  minimumProfitEth:Number(settings.minEstimatedProfitAud??0)/q.spot},
+  minimumProfitEth:(Number(settings.minEstimatedProfitAud??0)>0?Number(settings.minEstimatedProfitAud)+Number(settings.estimatedExtraCostsAud??0):0)/q.spot},
   available:true,spot:q.spot,required:enabled};
 }
 export function audLimitSummary(settings,quote,now=Date.now()){
@@ -157,6 +159,7 @@ export function audLimitSummary(settings,quote,now=Date.now()){
 export function applyFiatMinimum(rows,settings,quote,now=Date.now()){
  const threshold=fiatMinimumStatus(settings,quote,now);
  const minimumProfitAud=Number(settings?.minEstimatedProfitAud??0);
+ const extraCostsAud=Number(settings?.estimatedExtraCostsAud??0);
  const resaleFeesPct=Number(settings?.estimatedResaleFeesPct);
  return rows.map(row=>{
   const total=Number(row.totalWithFeesEth);
@@ -171,11 +174,12 @@ export function applyFiatMinimum(rows,settings,quote,now=Date.now()){
    Number.isFinite(qty)&&qty>0&&Number.isFinite(total)&&
    Number.isFinite(resaleFeesPct)
     ?reference*qty*(1-resaleFeesPct/100)-total:null;
-  const estimatedProfitAud=threshold.available&&estimatedProfitEth!==null?estimatedProfitEth*threshold.spot:null;
+  const estimatedProfitBeforeExtraCostsAud=threshold.available&&estimatedProfitEth!==null?estimatedProfitEth*threshold.spot:null;
+  const estimatedProfitAud=estimatedProfitBeforeExtraCostsAud===null?null:estimatedProfitBeforeExtraCostsAud-extraCostsAud;
   const minProfitPassed=minimumProfitAud<=0||
    (estimatedProfitAud!==null&&estimatedProfitAud+1e-8>=minimumProfitAud);
   return {...row,estimatedFiatCost,fiatMinPassed,estimatedProfitEth,
-   estimatedProfitAud,minProfitPassed,eligible:row.eligible===true&&fiatMinPassed&&minProfitPassed};
+   estimatedProfitBeforeExtraCostsAud,estimatedExtraCostsAud:extraCostsAud,estimatedProfitAud,minProfitPassed,eligible:row.eligible===true&&fiatMinPassed&&minProfitPassed};
  });
 }
 
@@ -212,10 +216,21 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
    floor:row.floor??null,
    eligible:row.eligible===true,metadataResolved:row.metadataResolved===true,image:row.image||'',
     estimatedFiatCost:row.estimatedFiatCost??null,fiatMinPassed:row.fiatMinPassed!==false,
-    estimatedProfitAud:row.estimatedProfitAud??null,minProfitPassed:row.minProfitPassed!==false},
+    estimatedProfitAud:row.estimatedProfitAud??null,
+    estimatedExtraCostsAud:row.estimatedExtraCostsAud??0,
+    opportunityScore:row.opportunityScore??null,scorePassed:row.scorePassed!==false,
+    liquidity:row.liquidity??'low',confidence:row.confidence??'low',
+    observedActiveOffers:row.observedActiveOffers??null,observedCheaperOffers:row.observedCheaperOffers??null,
+    observedNearPriceOffers:row.observedNearPriceOffers??null,verifiedSales7d:row.verifiedSales7d??0,
+    lastSaleAt:row.lastSaleAt??null,trendPct:row.trendPct??null,
+    partialActiveCoverage:row.partialActiveCoverage===true,scoreCautions:row.scoreCautions??[],
+    buyOffersVerified:false,minProfitPassed:row.minProfitPassed!==false},
   lastScan,marketplaceUrl:marketplaceSearchUrl(row),
   estimate:{resaleFeePct,expectedProceedsEth:expectedProceeds===null?null:round(expectedProceeds,10),
-   estimatedProfitEth:profit===null?null:round(profit,10),estimatedRoiPct:roi===null?null:round(roi,1)},
+   estimatedProfitEth:profit===null?null:round(profit,10),
+    estimatedNetProfitAud:row.estimatedProfitAud??null,estimatedExtraCostsAud:row.estimatedExtraCostsAud??0,
+    estimatedRoiPct:row.estimatedFiatCost>0&&Number.isFinite(row.estimatedProfitAud)?
+      round(row.estimatedProfitAud/row.estimatedFiatCost*100,1):roi===null?null:round(roi,1)},
   history:{count30d:sold30.length,count90d:comparable.length,
    returned:Math.min(comparable.length,180),limited:comparable.length>180,
    sales:comparable.sort((a,b)=>b.timestamp-a.timestamp).slice(0,180).map(s=>({
@@ -225,7 +240,7 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
 }
 /** Explain why genuine listings are not actionable; first blocking gate per NFT. */
 export function candidateDiagnostics(rows,settings){
- const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,belowFiatMinimum:0,discountTooSmall:0,netEdgeTooSmall:0,belowEstimatedProfit:0,multiQuantity:0};
+ const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,belowFiatMinimum:0,discountTooSmall:0,netEdgeTooSmall:0,belowEstimatedProfit:0,belowOpportunityScore:0,multiQuantity:0};
  for(const r of rows){
   if(r.eligible){counts.eligible++;continue;}
   if(!r.metadataResolved){counts.missingMetadata++;continue;}
@@ -236,6 +251,7 @@ export function candidateDiagnostics(rows,settings){
   if(!Number.isFinite(r.discount)||r.discount<settings.minDiscountPct){counts.discountTooSmall++;continue;}
   if(!Number.isFinite(r.netEdge)||r.netEdge<settings.minNetEdgePct){counts.netEdgeTooSmall++;continue;}
   if(r.minProfitPassed===false){counts.belowEstimatedProfit++;continue;}
+  if(r.scorePassed===false){counts.belowOpportunityScore++;continue;}
   // Never silently label a listing actionable if a future safety gate is added.
   counts.insufficientComparableSales++;
  }
@@ -249,9 +265,9 @@ export function candles(sales,key,now=Date.now()){
 }
 export function validateSettings(s){
  const n=JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
- for(const [k,min,max] of [['refreshSeconds',30,900],['pagesPerCollection',1,40],['minDiscountPct',0,95],['minSales30d',3,100],['minNetEdgePct',0,1000],['estimatedResaleFeesPct',0,60],['maximumPriceEth',0.00001,2],['dailyBudgetEth',0.0001,5],['minPriceEth',0,0.5],['minimumFiatPrice',0,100000],['minEstimatedProfitAud',0,1000000],['maxPurchasesPerDay',1,50]]){
+ for(const [k,min,max] of [['refreshSeconds',30,900],['pagesPerCollection',1,40],['minDiscountPct',0,95],['minSales30d',3,100],['minNetEdgePct',0,1000],['estimatedResaleFeesPct',0,60],['maximumPriceEth',0.00001,2],['dailyBudgetEth',0.0001,5],['minPriceEth',0,0.5],['minimumFiatPrice',0,100000],['minEstimatedProfitAud',0,1000000],['minOpportunityScore',0,100],['estimatedExtraCostsAud',0,100000],['deepScanPages',1,80],['deepScanIntervalMinutes',15,1440],['maxPurchasesPerDay',1,50]]){
   const x=Number(s?.[k]??n[k]);if(!Number.isFinite(x)||x<min||x>max)throw new Error(`${k} must be between ${min} and ${max}`);
-  n[k]=['refreshSeconds','pagesPerCollection','minSales30d','maxPurchasesPerDay'].includes(k)?Math.floor(x):x;
+  n[k]=['refreshSeconds','pagesPerCollection','minSales30d','maxPurchasesPerDay','minOpportunityScore','deepScanPages','deepScanIntervalMinutes'].includes(k)?Math.floor(x):x;
  }
  if(n.dailyBudgetEth<n.maximumPriceEth)throw new Error('Daily budget must be >= maximum purchase price');
  n.fiatCurrency=String(s?.fiatCurrency??n.fiatCurrency).toUpperCase();
@@ -265,6 +281,7 @@ export function validateSettings(s){
  }
  if(n.maximumPriceAud!==null&&n.dailyBudgetAud!==null&&n.dailyBudgetAud<n.maximumPriceAud)
   throw new Error('Daily AUD budget must be at least the maximum AUD purchase price');
+ n.deepScanEnabled=s?.deepScanEnabled===true;
  n.mode='live'; // Ignore obsolete persisted demo and paper-trading settings.
  n.publishableKey=String(s?.publishableKey??'').trim().slice(0,200);
  n.openSeaApiKey=String(s?.openSeaApiKey??'').trim().slice(0,512);
