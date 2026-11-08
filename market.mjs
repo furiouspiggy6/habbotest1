@@ -1,4 +1,5 @@
 import {COLLECTIONS,normalizeOrder,orderRejectionReason,hydrateNames} from './core.mjs';
+import {parseDirectBid} from './bid-market.mjs';
 
 const chainName='imtbl-zkevm-mainnet';
 const API_BASE='https://api.immutable.com';
@@ -78,7 +79,11 @@ export function createReadClients(publishableKey='',fetcher=globalThis.fetch,api
     page_size:request.pageSize,
     page_cursor:request.pageCursor
    }),
-   getListing:orderId=>read(`/v1/chains/${chainName}/orders/listings/${encodeURIComponent(orderId)}`)
+   getListing:orderId=>read(`/v1/chains/${chainName}/orders/listings/${encodeURIComponent(orderId)}`),
+   listBids:request=>read(`/v1/chains/${chainName}/orders/bids`,{
+    buy_item_contract_address:request.buyItemContractAddress,
+    status:request.status,page_size:request.pageSize,page_cursor:request.pageCursor
+   })
   },
   blockchainData:{
    getNFT:request=>read(`/v1/chains/${chainName}/collections/${encodeURIComponent(request.contractAddress)}/nfts/${encodeURIComponent(request.tokenId)}`),
@@ -217,6 +222,7 @@ export async function resolveMetadata(client,orders,cache,limit=120){
 export async function scanMarket(settings,cache,progress={},clients=createReadClients(settings.publishableKey),historicalSales=[]){
  let listings=[],filled=[],warnings=[],pages=0,truncated=0,received=0,failedRequests=0,successfulRequests=0;
  const diagnostics=[];const rejected={};
+ const bids=[],bidDiagnostics=[];
  const quotes=new Set();let historyPending=0,historyCompleted=0;
  const addResult=(result,col,status)=>{
    pages+=result.pages;received+=result.received;
@@ -234,6 +240,21 @@ export async function scanMarket(settings,cache,progress={},clients=createReadCl
    if(active.pageError){failedRequests++;warnings.push(`${col.name} ACTIVE stopped after ${active.pages} pages; ${active.orders.length} real offers retained. Error: ${active.pageError}`);}
    if(active.limited){truncated++;warnings.push(`${col.name} ACTIVE: more listings exist beyond the ${active.pages} downloaded pages${active.pageError?' (scan interrupted)':' (page limit reached)'}.`);}
   }catch(e){failedRequests++;const message=String(e?.message??e).slice(0,220);warnings.push(`${col.name} ACTIVE request failed: ${message}`);diagnostics.push({collection:col.name,status:'ACTIVE',error:message});}
+  // Read-only direct-token buy bids. These cannot be assumed executable or
+  // converted to automatic sales. One bounded page per collection prevents
+  // bid monitoring from overwhelming the primary listings/historical indexer.
+  if(typeof clients.orderbook.listBids==='function'){
+   try{
+    const raw=await clients.orderbook.listBids({buyItemContractAddress:col.address,status:'ACTIVE',pageSize:50});
+    const page=unpackPage(raw),accepted=page.data.map(b=>parseDirectBid(b,col)).filter(Boolean);
+    bids.push(...accepted);
+    bidDiagnostics.push({collection:col.name,received:page.data.length,accepted:accepted.length,partial:Boolean(page.next),error:null});
+   }catch(error){
+    const message=String(error?.message??error).slice(0,130);
+    bidDiagnostics.push({collection:col.name,received:0,accepted:0,partial:false,error:message});
+    warnings.push(`${col.name} bids unavailable: ${message}. Direct bid data omitted; seller listing scan continues.`);
+   }
+  }
   // A fresh first page on every scan captures new fills. Older FILLED pages are
   // indexed incrementally using a persisted cursor, rather than starting over
   // from page one on every refresh. Each scan uses a small bounded budget.
@@ -292,5 +313,5 @@ export async function scanMarket(settings,cache,progress={},clients=createReadCl
  meta.remaining=remainingKeys.size;
  if(meta.remaining)warnings.push(`NFT identity indexing in progress: ${coverage.activeResolved}/${coverage.activeTotal} live listings and ${coverage.salesResolved}/${coverage.salesTotal} completed sales have verified metadata (${meta.remaining} token IDs outstanding).${meta.firstError?' Metadata API error: '+meta.firstError:''}`);
  if(filled.length===0)warnings.push('No usable completed orders retrieved. No purchase signals will be generated.');
- return {listings,filled,warnings,meta,coverage,pages,truncated,historyPending,historyCompleted,received,failedRequests,successfulRequests,quoteTypes:[...quotes],rejected,diagnostics};
+ return {listings,filled,bids,bidDiagnostics,warnings,meta,coverage,pages,truncated,historyPending,historyCompleted,received,failedRequests,successfulRequests,quoteTypes:[...quotes],rejected,diagnostics};
 }
