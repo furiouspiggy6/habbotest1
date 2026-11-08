@@ -1,3 +1,4 @@
+import {cheapestPerCollectible} from './listing-views.mjs';
 const $=id=>document.getElementById(id);
 const htmlSafe=v=>String(v??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=(n,places=6)=>Number.isFinite(Number(n))?Number(n).toFixed(places):'—';
@@ -86,12 +87,16 @@ function withinAudRange(row){
   list>=minimum&&total>=withFees&&total<=maximum;
 }
 function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),collection=$('collectionFilter').value,signal=$('signalFilter').value;
- const found=(data?.rows??[]).filter(x=>(!text||(`${x.name} ${x.tokenId} ${x.collection}`).toLowerCase().includes(text))&&(!collection||x.collection===collection)&&
+ const matched=(data?.rows??[]).filter(x=>(!text||(`${x.name} ${x.tokenId} ${x.collection}`).toLowerCase().includes(text))&&(!collection||x.collection===collection)&&
   (signal==='all'||(signal==='eligible'?x.eligible:withinAudRange(x))));
+ const grouped=$('cheapestOnly').checked;
+ const found=grouped?cheapestPerCollectible(matched):matched;
  visibleRows=found;
  if(!found.some(r=>r.id===selectedId))selectedId=found[0]?.id??null;
- $('scannerCount').textContent=data.candidateCount??0;
- $('resultCount').textContent=found.length===data.listingCount?`${found.length} live listings`:`${found.length} matching of ${data.listingCount??0} live listings`;
+ $('scannerCount').textContent=found.filter(x=>x.eligible).length;
+ $('resultCount').textContent=grouped
+  ?`${found.length} distinct items · ${matched.length} matching listings`
+  :matched.length===data.listingCount?`${matched.length} live listings`:`${matched.length} matching of ${data.listingCount??0} live listings`;
  const totalPages=Math.max(1,Math.ceil(found.length/ROWS_PER_PAGE));
  pageIndex=Math.min(pageIndex,totalPages-1);
  const start=pageIndex*ROWS_PER_PAGE;
@@ -99,7 +104,7 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
  $('pageSummary').textContent=found.length?`Showing ${start+1}–${start+limited.length} of ${found.length} · Page ${pageIndex+1}/${totalPages}`:'No matching listings';
  $('pagePrev').disabled=pageIndex===0;
  $('pageNext').disabled=pageIndex>=totalPages-1;
- body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}</div></td><td class="price">${audCash(r.price)}</td><td>${audCash(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
+ body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.price)}</td><td>${audCash(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
  body.querySelectorAll('tr').forEach(tr=>tr.addEventListener('click',()=>{selectedId=tr.dataset.order;renderMarket();void loadChart(true);}));
  body.querySelectorAll('.row-inspect').forEach(btn=>btn.addEventListener('click',event=>{
   event.stopPropagation();selectedId=btn.dataset.inspectOrder;
@@ -292,7 +297,7 @@ document.querySelectorAll('.nav').forEach(b=>b.addEventListener('click',()=>view
 $('bannerGo').addEventListener('click',()=>{view('market');$('scanDiagnostics').scrollIntoView({behavior:'smooth',block:'center'});});
 $('engineButton').addEventListener('click',()=>view('settings'));
 $('refreshBtn').addEventListener('click',async()=>{try{await api('/api/refresh',{});toast('Market refresh started');}catch(e){toast(e.message,true);}});
-for(const [id,ev] of [['searchInput','input'],['collectionFilter','change'],['signalFilter','change']])$(id).addEventListener(ev,()=>{pageIndex=0;filterRows();});
+for(const [id,ev] of [['searchInput','input'],['collectionFilter','change'],['signalFilter','change'],['cheapestOnly','change']])$(id).addEventListener(ev,()=>{pageIndex=0;filterRows();renderDetail();void loadChart(true);});
  $('pagePrev').addEventListener('click',()=>{if(pageIndex>0){pageIndex--;filterRows();}});
  $('pageNext').addEventListener('click',()=>{pageIndex++;filterRows();});
 $('exportBtn').addEventListener('click',()=>{window.location.href='/api/export.csv';});
