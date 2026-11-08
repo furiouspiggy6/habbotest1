@@ -294,7 +294,7 @@ function drawChart(items,daysRange){const svg=$('priceChart');svg.innerHTML='';
  svg.append(wick,box);});
  svg.append(makeSvg('text',{x:plot.x,y:218,fill:'#8295a9','font-size':10},filtered[0].date.slice(5)));
  svg.append(makeSvg('text',{x:plot.x+plot.w,y:218,fill:'#8295a9','font-size':10,'text-anchor':'end'},filtered.at(-1).date.slice(5)));
- $('chartHint').textContent=`${filtered.length} trading day(s) · Open / High / Low / Close from completed transactions · AUD estimates at the current spot rate`;
+ $('chartHint').textContent=`${filtered.length} trading day(s) · Open / High / Low / Close from completed transactions · AUD base sale prices (excludes buyer fees), current BUY TOTAL includes fees`;
 }
 async function loadChart(force=false){const r=selectedRow();if(!r){drawChart([],days);return;}
  if(!force&&selectedKey===r.key&&Date.now()-lastChartRequest<20000){if(currentChart)drawChart(currentChart,days);return;}
