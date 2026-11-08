@@ -1,6 +1,6 @@
 {
   "name": "habbo-nft-market-radar",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "private": true,
   "type": "module",
   "description": "Local Habbo NFT scanner, candlestick charts, paper autobuyer and gated live buying adapter",
