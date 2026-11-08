@@ -14,6 +14,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   minDiscountPct:25, minSales30d:3, minNetEdgePct:12,
   estimatedResaleFeesPct:7.5, maximumPriceEth:0.015,
   minPriceEth:0.00005, minimumFiatPrice:5, fiatCurrency:'AUD', dailyBudgetEth:0.05, maxPurchasesPerDay:5,
+  maximumPriceAud:null, dailyBudgetAud:null, minPriceAud:null,
   collections:COLLECTIONS, publishableKey:''
 });
 export const round=(v,d=8)=>Number(Number(v).toFixed(d));
@@ -113,6 +114,31 @@ export function fiatMinimumStatus(settings,quote,now=Date.now()){
   equivalentWeth:minimum>0&&fresh?minimum/spot:null,
   fetchedAt:fresh?fetchedAt:null,required:minimum>0};
 }
+// AUD limits are authoritative once saved; existing installations use their
+// old WETH caps until the owner saves the AUD inputs for the first time.
+export function audRateRequired(settings){
+ return Number(settings?.minimumFiatPrice)>0 ||
+  ['maximumPriceAud','dailyBudgetAud','minPriceAud'].some(k=>settings?.[k]!==null&&settings?.[k]!==undefined);
+}
+export function effectiveAudSettings(settings,quote,now=Date.now()){
+ const q=fiatMinimumStatus({...settings,fiatCurrency:'AUD'},quote,now);
+ const enabled=audRateRequired(settings);
+ if(!q.available)return {settings:{...settings},available:!enabled,spot:null,required:enabled};
+ const convert=(k,old)=>settings[k]===null||settings[k]===undefined?settings[old]:settings[k]/q.spot;
+ return {settings:{...settings,maximumPriceEth:convert('maximumPriceAud','maximumPriceEth'),
+  dailyBudgetEth:convert('dailyBudgetAud','dailyBudgetEth'),
+  minPriceEth:convert('minPriceAud','minPriceEth')},
+  available:true,spot:q.spot,required:enabled};
+}
+export function audLimitSummary(settings,quote,now=Date.now()){
+ const q=fiatMinimumStatus({...settings,fiatCurrency:'AUD'},quote,now);
+ const toAud=(k,old)=>settings[k]!==null&&settings[k]!==undefined?settings[k]:
+   q.available?settings[old]*q.spot:null;
+ return {maximumPriceAud:toAud('maximumPriceAud','maximumPriceEth'),
+  dailyBudgetAud:toAud('dailyBudgetAud','dailyBudgetEth'),
+  minPriceAud:toAud('minPriceAud','minPriceEth'),
+  available:q.available};
+}
 export function applyFiatMinimum(rows,settings,quote,now=Date.now()){
  const threshold=fiatMinimumStatus(settings,quote,now);
  return rows.map(row=>{
@@ -197,6 +223,15 @@ export function validateSettings(s){
  if(n.dailyBudgetEth<n.maximumPriceEth)throw new Error('Daily budget must be >= maximum purchase price');
  n.fiatCurrency=String(s?.fiatCurrency??n.fiatCurrency).toUpperCase();
  if(!['AUD','USD'].includes(n.fiatCurrency))throw new Error('fiatCurrency must be AUD or USD');
+ for(const [key,min,max] of [['maximumPriceAud',0.01,1000000],['dailyBudgetAud',0.01,1000000],['minPriceAud',0,1000000]]){
+  const raw=s?.[key]??null;
+  if(raw===null){n[key]=null;continue;}
+  const value=Number(raw);
+  if(!Number.isFinite(value)||value<min||value>max)throw new Error(`${key} must be between ${min} and ${max} AUD`);
+  n[key]=value;
+ }
+ if(n.maximumPriceAud!==null&&n.dailyBudgetAud!==null&&n.dailyBudgetAud<n.maximumPriceAud)
+  throw new Error('Daily AUD budget must be at least the maximum AUD purchase price');
  n.mode='live'; // Ignore obsolete persisted demo and paper-trading settings.
  n.publishableKey=String(s?.publishableKey??'').trim().slice(0,200);
  n.collections=COLLECTIONS.map(c=>({...c,enabled:(s?.collections??COLLECTIONS).some(x=>x.address===c.address&&x.enabled)}));
