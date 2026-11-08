@@ -92,6 +92,8 @@ function collectSettings(){const old=data.settings;return {...old,mode:document.
 async function sync(){try{const incoming=await api('/api/state');data=incoming;
  if($('appVersion'))$('appVersion').textContent='v'+data.appVersion;
  if($('updaterVersion'))$('updaterVersion').textContent='v'+data.appVersion;
+ if($('autoInstallUpdates'))$('autoInstallUpdates').checked=data.updatePrefs?.autoInstall??true;
+ if(data.updateStatus?.message&&!updateBusy&&!availableUpdate)$('updateDetails').textContent=data.updateStatus.message;
  if(!selectedId||!data.rows.some(r=>r.id===selectedId))selectedId=data.rows[0]?.id||null;
  renderMarket();if(currentTab==='trades')renderTrades();if(currentTab==='settings')renderReadiness();
  if(!settingsLoaded){fillSettings();settingsLoaded=true;}
@@ -124,6 +126,14 @@ async function checkForUpdate(){
  finally{updateBusy=false;$('checkUpdateBtn').disabled=false;}
 }
 $('checkUpdateBtn').addEventListener('click',checkForUpdate);
+$('autoInstallUpdates').addEventListener('change',async()=>{
+ const enabled=$('autoInstallUpdates').checked;
+ try{
+  const result=await api('/api/update/preferences',{autoInstall:enabled});
+  $('updateDetails').textContent=result.updateStatus?.message||'Preference saved.';
+  toast(enabled?'Automatic updates enabled. No ZIP downloads needed.':'Automatic updates disabled.');
+ }catch(err){$('autoInstallUpdates').checked=!enabled;toast(err.message,true);}
+});
 $('installUpdateBtn').addEventListener('click',async()=>{
  if(!availableUpdate||updateBusy)return;
  if(data?.armed){toast('Disarm real-money autobuying first.',true);return;}
