@@ -10,7 +10,7 @@ export const COLLECTIONS = [
   {name:'Legacy Clothes 1155',address:'0xe39e60393d25adb35158052572b06af2294d98cc',enabled:false}
 ];
 export const DEFAULT_SETTINGS = Object.freeze({
-  mode:'live', paperAutoBuy:true, refreshSeconds:90, pagesPerCollection:6,
+  mode:'live', refreshSeconds:90, pagesPerCollection:6,
   minDiscountPct:25, minSales30d:3, minNetEdgePct:12,
   estimatedResaleFeesPct:7.5, maximumPriceEth:0.015,
   minPriceEth:0.00005, dailyBudgetEth:0.05, maxPurchasesPerDay:5,
@@ -113,28 +113,8 @@ export function validateSettings(s){
   n[k]=['refreshSeconds','pagesPerCollection','minSales30d','maxPurchasesPerDay'].includes(k)?Math.floor(x):x;
  }
  if(n.dailyBudgetEth<n.maximumPriceEth)throw new Error('Daily budget must be >= maximum purchase price');
- n.mode=s?.mode==='demo'?'demo':'live'; n.paperAutoBuy=Boolean(s?.paperAutoBuy??true);
+ n.mode='live'; // Ignore obsolete persisted demo and paper-trading settings.
  n.publishableKey=String(s?.publishableKey??'').trim().slice(0,200);
  n.collections=COLLECTIONS.map(c=>({...c,enabled:(s?.collections??COLLECTIONS).some(x=>x.address===c.address&&x.enabled)}));
  if(!n.collections.some(x=>x.enabled))throw new Error('Choose at least one collection');return n;
-}
-export const DEMO_ITEMS=[
- ['Golden Dragon · sample','Furni',.012,.0072,9],['Royal Throne · sample','Furni',.008,.0057,13],
- ['Neon Jacket · sample','Clothes',.004,.0038,17],['Midnight Sofa · sample','Furni',.0019,.0011,2],
- ['Emerald Display · sample','Tokens',.009,.0085,11],['Blue Pet Accessory · sample','Pets',.0036,.00215,7],
- ['Collectors Halo · sample','Addons',.018,.0139,6],['Silver Dragon · sample','Furni',.0061,.0038,14]
-];
-export function demoOrders(now=Date.now()){
- const listings=[],filled=[];
- for(let j=0;j<DEMO_ITEMS.length;j++){
-  const [name,c,ref,price,sales]=DEMO_ITEMS[j],contract=COLLECTIONS.find(x=>x.name===c).address;
-  const base={contract,collection:c,tokenId:String(1000+j),key:`${contract}|name:${name.toLowerCase()}`,name,
-    metadataResolved:true,image:'',href:'https://tokentrove.com/collection/Habbo',currency:'WETH',quantity:1,feeEstimateEth:0,tokenType:'ERC721'};
-  listings.push({...base,id:`demo-listing-${j}`,price,totalPrice:price,totalWithFeesEth:price,status:'ACTIVE',timestamp:now-j*7200000});
-  for(let i=0;i<sales;i++){
-   const value=round(ref*(1+Math.sin(i*3+j)*.055),10);
-   filled.push({...base,id:`demo-sale-${j}-${i}`,price:value,totalPrice:value,totalWithFeesEth:value,status:'FILLED',timestamp:now-(i*1.9+j*.35+1)*86400000});
-  }
- }
- return {listings,filled};
 }
