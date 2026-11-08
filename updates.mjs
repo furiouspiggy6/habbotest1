@@ -17,6 +17,10 @@ export const LOCAL_VERSION=LOCAL_PACKAGE.version;
 const MAX_BYTES=30*1024*1024;
 const REQ_HEADERS={'Accept':'application/vnd.github+json','User-Agent':'Habbo-NFT-Market-Radar-Update-Checker','X-GitHub-Api-Version':'2022-11-28'};
 
+// Pure scheduling guard: never interrupt scanning or real-money trading.
+export function canAutoUpdate({enabled,platform,armed,scanning,updating,now,nextAttemptAt}){
+ return enabled===true && platform==='win32' && !armed && !scanning && !updating && now>=nextAttemptAt;
+}
 export function versionParts(version){
  const m=/^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(version??''));
  return m?m.slice(1).map(Number):null;
