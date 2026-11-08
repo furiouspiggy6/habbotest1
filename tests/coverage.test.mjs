@@ -34,3 +34,19 @@ test('desktop receives all listings on demand, not a hard cap of 800, and shows 
  assert.match(html,/id="pagePrev"/);
  assert.match(html,/id="pageNext"/);
 });
+
+test('all decimal WETH and percentage settings accept valid values without HTML step mismatch',()=>{
+ const html=read('public/index.html');
+ for(const id of ['maximumPriceEth','dailyBudgetEth','minPriceEth','minDiscountPct','minNetEdgePct','estimatedResaleFeesPct']){
+  assert.match(html,new RegExp('id="'+id+'"[^>]*\\bstep="any"'));
+ }
+ // Non-decimal controls remain explicitly integral.
+ for(const id of ['minSales30d','maxPurchasesPerDay','refreshSeconds','pagesPerCollection']){
+  assert.match(html,new RegExp('id="'+id+'"[^>]*\\bstep="1"'));
+ }
+ const changed=validateSettings({...DEFAULT_SETTINGS,maximumPriceEth:0.015,dailyBudgetEth:0.05,minPriceEth:0.00002,minDiscountPct:18.2});
+ assert.equal(changed.maximumPriceEth,0.015);
+ assert.equal(changed.dailyBudgetEth,0.05);
+ assert.equal(changed.minPriceEth,0.00002);
+ assert.equal(changed.minDiscountPct,18.2);
+});
