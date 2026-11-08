@@ -265,7 +265,7 @@ async function scan(forceDeep=false){if(scanning||updating)return;scanning=true;
    return {...row,scorePassed,bestOfferPassed,
     eligible:row.eligible&&risk.available&&scorePassed&&bestOfferPassed,
     fiatMinPassed:row.fiatMinPassed&&risk.available};
-  }))),state.settings);
+  })),state.settings);
   automatedSummary=decisionSummary(displayRows);
   if(!risk.available){
    warnings.unshift('Live AUD quote unavailable or older than 15 minutes: dollar-denominated signals and purchases are BLOCKED until the rate is refreshed.'+(fiatRateError?' '+fiatRateError:''));
