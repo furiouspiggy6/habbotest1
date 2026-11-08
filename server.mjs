@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics} from './core.mjs';
+import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage} from './core.mjs';
 import {scanMarket} from './market.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
 import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
@@ -15,7 +15,7 @@ function dotenv(){try{for(const line of fs.readFileSync(path.join(HERE,'.env'),'
  }}catch{}}
 dotenv();
 function readState(){try{const old=JSON.parse(fs.readFileSync(storePath,'utf8'));
- const nextSettings=validateSettings(old.settings);
+ const nextSettings=upgradeLegacyScanCoverage(old.settings,old.schemaVersion??0);
  return {settings:nextSettings,updatePrefs:{autoInstall:old.updatePrefs?.autoInstall!==false},metadata:old.metadata??{},historicalSales:(old.historicalSales??[]).filter(x=>!String(x?.id??'').startsWith('demo-') && !String(x?.name??'').includes(' · sample')),
  liveTrades:old.liveTrades??[],events:old.events??[]};
  }catch{return {settings:validateSettings(DEFAULT_SETTINGS),updatePrefs:{autoInstall:true},metadata:{},historicalSales:[],liveTrades:[],events:[]};}}
@@ -26,7 +26,7 @@ let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
 let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
 let liveArmed=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
 let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[],coverage:null,candidateDiagnostics:null};
-function save(){const output={schemaVersion:7,settings:state.settings,updatePrefs:state.updatePrefs,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
+function save(){const output={schemaVersion:8,settings:state.settings,updatePrefs:state.updatePrefs,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
  const tmp=storePath+'.tmp';fs.writeFileSync(tmp,JSON.stringify(output,null,2));fs.renameSync(tmp,storePath);}
 function event(kind,message){state.events.unshift({kind,message,time:Date.now()});state.events=state.events.slice(0,400);console.log(`[${kind}] ${message}`);}
 function today(t){return new Date(t).toISOString().slice(0,10);}
@@ -37,7 +37,8 @@ function safeSummary(){return {
  settings:state.settings,scanning,lastScan:scannedAt,now:Date.now(),armed:liveArmed,
  hasDedicatedWallet:/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''),
  liveEnvironmentEnabled:process.env.HABBO_ENABLE_LIVE_BUYS==='YES',warnings,stats,
- rows:displayRows.slice(0,800),events:state.events.slice(0,60),
+ listingCount:displayRows.length,candidateCount:displayRows.filter(x=>x.eligible).length,
+ rows:displayRows.slice(0,50),events:state.events.slice(0,60),
  liveTrades:state.liveTrades.slice(-100).reverse(),
  liveSpentToday:usedBudget(state.liveTrades)
  };}
@@ -196,6 +197,9 @@ const server=http.createServer(async(req,res)=>{
    const file=path.join(HERE,assets.get(uri.pathname));return send(res,200,fs.readFileSync(file,'utf8'),uri.pathname.endsWith('.js')?'text/javascript; charset=utf-8':uri.pathname.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');
   }
   if(req.method==='GET'&&uri.pathname==='/api/state')return send(res,200,safeSummary());
+  // Fetch the complete real order set on demand, rather than truncating at 800
+  // or transferring thousands of rows on every 4-second status refresh.
+  if(req.method==='GET'&&uri.pathname==='/api/listings')return send(res,200,{lastScan:scannedAt,total:displayRows.length,rows:displayRows});
   if(req.method==='GET'&&uri.pathname==='/api/update/check'){
    if(process.env.HABBO_DESKTOP_APP==='1')return send(res,410,{error:'Use the desktop software update button instead.'});
    try {lastCheckedUpdate=await checkForUpdates();return send(res,200,lastCheckedUpdate);} 
