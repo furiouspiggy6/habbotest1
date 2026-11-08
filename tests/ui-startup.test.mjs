@@ -17,7 +17,8 @@ test('dashboard click handler registrations and initialization are not duplicate
  }
  assert.ok(js.length<45000,'UI code unexpectedly bloated by duplicate substitution');
  assert.match(js,/document\.querySelectorAll\('\.nav'\)\.forEach\(b=>b\.addEventListener\('click'/);
- assert.match(js,/\$\('fiatCurrency'\)\.value/);
+ assert.doesNotMatch(js,/\$\('fiatCurrency'\)/);
+ for(const id of ['maximumPriceAud','dailyBudgetAud','minPriceAud'])assert.ok(js.includes(id));
  assert.match(js,/'minimumFiatPrice'/);
  assert.match(js,/\$\('inspectSelectedBtn'\)\.addEventListener\('click'/);
 });
