@@ -6,11 +6,11 @@ export const COLLECTIONS = [
   {name:'Addons',address:'0x2da5094f8c6cd42f5b3b24803f998a28b40a398f',enabled:true},
   {name:'Pets',address:'0xb7727da90019d072a5f8fdd58ff4522f796a20c5',enabled:true},
   {name:'Tokens',address:'0xe06f06a4128373ecc5444881a6a26fc18723487a',enabled:true},
-  {name:'Legacy Furni 1155',address:'0x1486faae8ee170fdaac3fdea761a5a421e406ae2',enabled:false},
-  {name:'Legacy Clothes 1155',address:'0xe39e60393d25adb35158052572b06af2294d98cc',enabled:false}
+  {name:'Legacy Furni 1155',address:'0x1486faae8ee170fdaac3fdea761a5a421e406ae2',enabled:true},
+  {name:'Legacy Clothes 1155',address:'0xe39e60393d25adb35158052572b06af2294d98cc',enabled:true}
 ];
 export const DEFAULT_SETTINGS = Object.freeze({
-  mode:'live', refreshSeconds:90, pagesPerCollection:6,
+  mode:'live', refreshSeconds:90, pagesPerCollection:20,
   minDiscountPct:25, minSales30d:3, minNetEdgePct:12,
   estimatedResaleFeesPct:7.5, maximumPriceEth:0.015,
   minPriceEth:0.00005, dailyBudgetEth:0.05, maxPurchasesPerDay:5,
@@ -124,7 +124,7 @@ export function candles(sales,key,now=Date.now()){
 }
 export function validateSettings(s){
  const n=JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
- for(const [k,min,max] of [['refreshSeconds',30,900],['pagesPerCollection',1,20],['minDiscountPct',0,95],['minSales30d',3,100],['minNetEdgePct',0,1000],['estimatedResaleFeesPct',0,60],['maximumPriceEth',0.00001,2],['dailyBudgetEth',0.0001,5],['minPriceEth',0,0.5],['maxPurchasesPerDay',1,50]]){
+ for(const [k,min,max] of [['refreshSeconds',30,900],['pagesPerCollection',1,40],['minDiscountPct',0,95],['minSales30d',3,100],['minNetEdgePct',0,1000],['estimatedResaleFeesPct',0,60],['maximumPriceEth',0.00001,2],['dailyBudgetEth',0.0001,5],['minPriceEth',0,0.5],['maxPurchasesPerDay',1,50]]){
   const x=Number(s?.[k]??n[k]);if(!Number.isFinite(x)||x<min||x>max)throw new Error(`${k} must be between ${min} and ${max}`);
   n[k]=['refreshSeconds','pagesPerCollection','minSales30d','maxPurchasesPerDay'].includes(k)?Math.floor(x):x;
  }
@@ -133,4 +133,18 @@ export function validateSettings(s){
  n.publishableKey=String(s?.publishableKey??'').trim().slice(0,200);
  n.collections=COLLECTIONS.map(c=>({...c,enabled:(s?.collections??COLLECTIONS).some(x=>x.address===c.address&&x.enabled)}));
  if(!n.collections.some(x=>x.enabled))throw new Error('Choose at least one collection');return n;
+}
+
+// Upgrade only the pre-v2.0.1 default scan depth and default five-collection
+// selection. Preserve custom depths, disabled collections and future preferences.
+export function upgradeLegacyScanCoverage(settings, schemaVersion=0){
+ const n=validateSettings(settings);
+ if(Number(schemaVersion)>=8)return n;
+ if(Number(settings?.pagesPerCollection??6)===6)n.pagesPerCollection=20;
+ const regular=n.collections.filter(c=>!c.name.startsWith('Legacy '));
+ const legacy=n.collections.filter(c=>c.name.startsWith('Legacy '));
+ if(legacy.length===2&&regular.every(c=>c.enabled)&&legacy.every(c=>!c.enabled)){
+  for(const c of legacy)c.enabled=true;
+ }
+ return n;
 }
