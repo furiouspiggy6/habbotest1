@@ -206,7 +206,7 @@ async function scan(){if(scanning||updating)return;scanning=true;
   // Instead, the dollar floor fails closed and no new live buys qualify.
   await refreshFiatRates();
   void refreshOpenSea(); // separate read-only feed; never blocks Immutable scanner
-  const r=await scanMarket(state.settings,state.metadata,state.scanProgress);
+  const r=await scanMarket(state.settings,state.metadata,state.scanProgress,undefined,state.historicalSales);
   const {listings,filled}=r;
   warnings=r.warnings;
   stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics,coverage:r.coverage,candidateDiagnostics:null,historyPending:r.historyPending,historyCompleted:r.historyCompleted};
