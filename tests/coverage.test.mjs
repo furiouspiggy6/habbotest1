@@ -50,3 +50,15 @@ test('all decimal WETH and percentage settings accept valid values without HTML 
  assert.equal(changed.minPriceEth,0.00002);
  assert.equal(changed.minDiscountPct,18.2);
 });
+
+
+test('dashboard distinguishes page cap warnings from actual request failures',()=>{
+ const ui=read('public/app.js'),server=read('server.mjs');
+ assert.match(ui,/title=`Immutable requests failed \(\$\{failureCount\}\)`/);
+ assert.match(ui,/const specificError=data.warnings.find/);
+ assert.match(ui,/Live listing coverage limited by scan depth/);
+ assert.match(ui,/scanDiagnostics'\).scrollIntoView/);
+ assert.doesNotMatch(ui,/title=hasErrors\?'Immutable API connection problems'/);
+ assert.match(server,/PARTIAL ACTIVE COVERAGE/);
+ assert.doesNotMatch(server,/not every listing or past sale was downloaded/);
+});
