@@ -48,12 +48,15 @@ export function createReadClients(publishableKey='',fetcher=globalThis.fetch,api
   return result;
  }
  return {
-  orderbook:{listListings:request=>read(`/v1/chains/${chainName}/orders/listings`,{
+  orderbook:{
+   listListings:request=>read(`/v1/chains/${chainName}/orders/listings`,{
     sell_item_contract_address:request.sellItemContractAddress,
     status:request.status,
     page_size:request.pageSize,
     page_cursor:request.pageCursor
-  })},
+   }),
+   getListing:orderId=>read(`/v1/chains/${chainName}/orders/listings/${encodeURIComponent(orderId)}`)
+  },
   blockchainData:{getNFT:request=>read(`/v1/chains/${chainName}/collections/${encodeURIComponent(request.contractAddress)}/nfts/${encodeURIComponent(request.tokenId)}`)}
  };
 }
