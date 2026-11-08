@@ -17,6 +17,7 @@ let downloadedUpdate = null;
 let installingUpdate = false;
 let checkingUpdate = false;
 let updateTimer = null;
+let networkUpdateTimer = null;
 let lastStatus = {phase:'starting', message:'Starting the desktop app...', version:app.getVersion()};
 let preferencePath = '';
 
@@ -31,7 +32,7 @@ function readAutoUpdatePreference() {
 function setAutoUpdatePreference(enabled) {
   fs.writeFileSync(preferencePath, JSON.stringify({autoUpdate:enabled}, null, 2), {mode:0o600});
   if(enabled) {scheduleUpdateChecks(); void checkForUpdates();}
-  else {if(updateTimer)clearInterval(updateTimer);updateTimer=null;sendStatus('disabled','Automatic updates turned off.');}
+  else {if(updateTimer)clearInterval(updateTimer);updateTimer=null;if(networkUpdateTimer)clearInterval(networkUpdateTimer);networkUpdateTimer=null;sendStatus('disabled','Automatic updates turned off.');}
   return {enabled};
 }
 function reserveLocalPort() {
@@ -97,11 +98,12 @@ async function installWhenSafe(){
   if(!downloadedUpdate||installingUpdate||!readAutoUpdatePreference())return;
   installingUpdate=true;
   try{
-    sendStatus('waiting',`Update v${downloadedUpdate.version} downloaded. Waiting for the scanner to finish safely...`);
-    // The backend pauses new scans before this returns, and will not interrupt a real-money purchase.
+    sendStatus('installing',`Update v${downloadedUpdate.version} downloaded. Preparing a safe restart...`);
+    // Read-only Immutable scans may be interrupted. An armed wallet or a real
+    // purchase in progress must never be interrupted to install an update.
     const paused=await serverControl.pauseForDesktopUpdate();
     if(!paused){
-      sendStatus('waiting',`Update v${downloadedUpdate.version} is ready. Install will wait until live buying is disarmed.`);
+      sendStatus('waiting',`Update v${downloadedUpdate.version} is ready. Disarm real-money buying and finish any pending purchase before installing. Closing the app also installs downloaded updates, but do not exit during a live purchase.`);
       installingUpdate=false;
       return;
     }
@@ -122,14 +124,22 @@ function setupUpdater(){
   autoUpdater.on('update-not-available',()=>sendStatus('current',`You're up to date (v${app.getVersion()}).`));
   autoUpdater.on('download-progress',progress=>sendStatus('downloading',`Downloading desktop update: ${Math.round(progress.percent)}%`,{percent:progress.percent}));
   autoUpdater.on('update-downloaded',info=>{downloadedUpdate=info;void installWhenSafe();});
-  autoUpdater.on('error',error=>sendStatus('error',`Desktop update failed: ${String(error?.message||error).slice(0,250)}`));
+  autoUpdater.on('error',error=>{
+    serverControl?.resumeAfterDesktopUpdate?.();
+    installingUpdate=false;
+    sendStatus('error',`Desktop update failed: ${String(error?.message||error).slice(0,250)}`);
+  });
 }
 function scheduleUpdateChecks(){
   if(updateTimer)clearInterval(updateTimer);
   if(!readAutoUpdatePreference())return;
   updateTimer=setInterval(()=>{
-    if(downloadedUpdate)void installWhenSafe(); else void checkForUpdates();
-  },UPDATE_INTERVAL_MS);
+    if(downloadedUpdate)void installWhenSafe();
+  },15000);
+  // Long interval for network checks; cached downloads retry locally and quickly.
+  if(!networkUpdateTimer){
+    networkUpdateTimer=setInterval(()=>{if(!downloadedUpdate)void checkForUpdates();},UPDATE_INTERVAL_MS);
+  }
 }
 async function run(){
   if(!app.requestSingleInstanceLock()){app.quit();return;}
