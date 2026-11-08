@@ -4,7 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing,normalizeOrder,fiatMinimumStatus,applyFiatMinimum,effectiveAudSettings,audLimitSummary} from './core.mjs';
 import {scanMarket,createReadClients} from './market.mjs';
-import {scoreOpportunityRows,sortByOpportunity} from './opportunity.mjs';
+import {scoreOpportunityRows,sortByOpportunity,applyConservativeResale} from './opportunity.mjs';
 import {fetchFiatRates} from './fiat.mjs';
 import {fetchOpenSeaAvatarListings,summarizeOpenSeaConnection} from './opensea.mjs';
 import {parseStackFloor} from './market-floor.mjs';
@@ -63,13 +63,13 @@ async function refreshOpenSea(){
 }
 const orderVerificationCache=new Map();
 const stackFloorCache=new Map();
-async function verifyReadOnlyStackFloor(row){
+async function verifyReadOnlyStackFloor(row,forceFresh=false){
  const now=Date.now();
  const prefix=row.contract+'|metadata:';
  const stackId=typeof row.key==='string'&&row.key.startsWith(prefix)?row.key.slice(prefix.length):null;
  if(!stackId)return {status:'unavailable',checkedAt:now,reason:'No verified metadata stack ID was provided for this NFT'};
  const key=row.contract+'|'+stackId,cached=stackFloorCache.get(key);
- if(cached&&now-cached.checkedAt<2*60_000)return cached;
+ if(!forceFresh&&cached&&now-cached.checkedAt<2*60_000)return cached;
  let floor;
  try{
   const client=createReadClients(state.settings.publishableKey);
@@ -187,7 +187,10 @@ async function doAutoTrades(){
   setAllowedContracts(state.settings.collections);
   // One live purchase per scan; never retry an ambiguous or failed order automatically.
   const target=displayRows.find(x=>eligibleForBudget(x,state.liveTrades,risk.settings,risk.spot)&&
-    x.metadataResolved&&x.sales30d>=state.settings.minSales30d);
+    x.metadataResolved&&x.sales30d>=state.settings.minSales30d&&
+    x.marketEvidencePassed===true&&x.conservativeDiscountPassed===true&&
+    x.conservativeNetEdgePassed===true&&x.minProfitPassed===true&&
+    Number.isFinite(x.conservativeResaleEth)&&x.conservativeResaleEth>0);
   if(!target)return;
   const attempt={timestamp:Date.now(),orderId:target.id,name:target.name,collection:target.collection,
     costEth:target.totalWithFeesEth,costAud:target.totalWithFeesEth*risk.spot,fairValueEth:target.reference,discount:target.discount,status:'pending',mode:'live'};
@@ -196,6 +199,13 @@ async function doAutoTrades(){
   liveBuyInFlight=true;
   try {
    state.liveTrades.push(attempt);save();event('live',`Trying LIVE purchase: ${target.name}`);
+   // Independent stack-floor lookup bypasses the cached inspector response.
+   // On partial orderbook coverage a cheaper competing order may be missing.
+   const stackFloor=await verifyReadOnlyStackFloor(target,true);
+   if(stackFloor.status!=='available')throw new Error('Cannot independently verify current comparable Immutable stack floor; live buy blocked.');
+   if(stackFloor.orderId&&stackFloor.orderId!==target.id&&
+      stackFloor.totalCostEth+1e-9<target.totalWithFeesEth)
+    throw new Error('Independent Immutable stack floor contains a cheaper offer; live buy blocked.');
    const result=await executeLiveBuy(target,risk.settings,process.env.HABBO_BOT_PRIVATE_KEY);
    attempt.status='completed';attempt.hash=result.hash;attempt.costEth=result.priceEth;attempt.costAud=result.priceEth*risk.spot;
    event('success',`LIVE purchase confirmed ${target.name} — ${result.hash}`);
@@ -242,7 +252,8 @@ async function scan(forceDeep=false){if(scanning||updating)return;scanning=true;
   const risk=effectiveAudSettings(state.settings,fiatRates);
   const partialCollections=r.diagnostics.filter(d=>d.status==='ACTIVE'&&(d.hasMore||d.error)).map(d=>d.collection);
   const priced=applyFiatMinimum(analyze(listings,chartSales,risk.settings),state.settings,fiatRates);
-  const scored=scoreOpportunityRows(priced,chartSales,{partialCollections});
+  const repriced=applyConservativeResale(priced,chartSales,state.settings,{audSpot:risk.spot});
+  const scored=scoreOpportunityRows(repriced,chartSales,{partialCollections});
   displayRows=sortByOpportunity(scored.map(row=>{
    const scorePassed=state.settings.minOpportunityScore<=0||
      (row.opportunityScore!==null&&row.opportunityScore>=state.settings.minOpportunityScore);
