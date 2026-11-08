@@ -1,3 +1,79 @@
-# Habbo NFT Market Radar
+# Habbo NFT Market Radar (Windows)
 
-Source import in progress.
+Local dashboard for **Habbo NFT collections on Immutable zkEVM only**. Tracks listings, recorded fills, price-history candles and underpriced offers. Includes automatic **paper** purchases, and a guarded, **experimental** real-money order execution module. It does not support ordinary Habbo furniture/credits, in-game Silver/Emerald sales, or Ethereum-mainnet premium Avatar/Portrait/Room NFTs.
+
+## Launch on Windows
+
+1. Extract the zip into a permanent folder.
+2. Install **Node.js 24 LTS or newer** from https://nodejs.org/en/download. The app checks your installed version before attempting to load the Immutable SDK.
+3. Double-click `START_WINDOWS.bat`. On first launch it downloads the official `@imtbl/sdk` and `ethers` dependencies using `npm install`. You need internet for this and for live data.
+4. Your browser opens `http://127.0.0.1:38571`. If it opens too soon, refresh the page.
+5. Initially you're in **Demo / Paper** mode, with clearly marked invented NFT examples. Go to **Strategy & settings → Live market data** to retrieve real data, then save. **Real-money buying remains OFF.**
+
+Run `npm test` from the extracted folder to check the pure-price and risk tests.
+
+## What you'll see
+
+- Market scanner for Furni, Clothes, Addons, Pets and Tokens (optional legacy ERC1155).
+- ERC20 WETH quotes only, not incorrectly labelled IMX/native tokens.
+- Previous completed order sales, metadata-grouped by identical NFT types (never compare unrelated token IDs).
+- Daily **OHLC candlestick** price charts. Each day's candles are constructed only from actual orderbook fill prices; no made-up days.
+- 30-day sale count, median reference, expected post-fee resale edge, minimum discount and per-purchase spending limits.
+- Paper autobuyer with local activity history and CSV export.
+- Local persistent metadata cache and sale ledger at `data/state.json`. Never upload this file if you don't want to share your trading activity.
+
+## Fixes in v1.0.1
+
+- Windows launcher checks for Node.js 24+ and stops with clear upgrade instructions rather than proceeding with incompatible SDK dependencies.
+- Demo sales stay separate from real market sale history and cannot affect live trade signals. Older fake demo sale records are discarded when loading the previous app state.
+- This patch does not resolve `npm audit` security advisories in transitive dependencies. Avoid using real funds until the SDK and runtime dependencies have been independently security-reviewed. Do **not** run `npm audit fix --force` blindly.
+
+## IMPORTANT: Limits of market data
+
+- This is not a tick-perfect market-wide sniper. It polls orderbook listings about every 90 seconds. Orderbook pagination is capped by your setting. Existing or historic orders can be absent from a scan. The dashboard shows coverage warnings.
+- The Immutable SDK, collection-address catalogue and metadata shapes may change. **Real API connectivity and real purchases were NOT tested in the creation environment**; if live data fails, review logs rather than assuming it's working.
+- Historical FILLED order timestamps may represent order update times rather than the precise moment of a trade; candlesticks are an approximation. Some types may have too few verifiable sales to value; the app refuses to fire signals for them.
+- Unresolved metadata is explicitly excluded from buy signals rather than treating unrelated token IDs as identical.
+- Pricing in bridged WETH does not include all possible costs: resale estimates use a configurable fee, buyer fees seen in the listing, and do **not** account for future gas, price impact, or inability to resell. Low liquidity makes apparent discounts deceptive.
+- This is not a guaranteed profit machine and does not automatically list or resell purchased NFTs.
+
+## Live autobuying: advanced and experimental
+
+**Do not turn this on until you've observed live market prices for a while, checked at least a few against TokenTrove, and tested with funds you can lose.** No live execution was performed or proven in this environment.
+
+Real autobuying requires a separate low-balance wallet and an API key if Immutable requires one. Never use the private key of your main MetaMask wallet.
+
+1. Copy `.env.example` to `.env` in the extracted directory. If you choose to enable trading later, use a dedicated wallet private key in `HABBO_BOT_PRIVATE_KEY` and set `HABBO_ENABLE_LIVE_BUYS=YES`. The key stays local to this computer and is never sent to the browser or the API status response, but `.env` is plaintext and must be secured.
+2. Fund the wallet with a strictly limited amount of **WETH on Immutable zkEVM** for purchases plus the network's native **IMX** for transaction gas. The app does not bridge funds.
+3. The bot **will not auto-grant ERC20 token approvals**. Approve a *limited* WETH allowance for the Immutable settlement contract manually using an audited wallet interface if needed. If an approval is required, the bot refuses the order and disarms rather than granting unlimited allowances.
+4. Switch dashboard to **Live market data**, set a conservative daily budget and maximum single buy, and save. The live orderbook must have been scanned successfully.
+5. Type `ENABLE LIVE NFT BUYING` into the live-buying lock and click Arm. The app NEVER auto-arms when it starts. It buys at most one item per scan, checks that its order is still live, checks total price/fees, gas estimate, chain ID and wallet balance, and records every attempted transaction. It stops and disarms on error.
+6. Disarm instantly from Strategy & settings, or close the app. Closing the terminal process stops future scheduled scans.
+
+**WARNING**: This implementation is experimental and the marketplace SDK flow may need version-specific adjustments before a real purchase can succeed. It has not been audit-reviewed. The developer assumes responsibility for adapting/upgrading SDK integrations and validating the exact settlement transactions against test trades. The bot never guarantees a price or a resale profit.
+
+## Under the hood
+
+- `core.mjs` pure pricing, metadata group keys, candles, safety limits
+- `market.mjs` Immutable Orderbook active/filled order polling and Blockchain Data metadata retrieval
+- `trade.mjs` explicitly gated on-chain purchase attempt using Immutable's `fulfillOrder` and ethers wallet, with pre-send rechecks
+- `server.mjs` localhost-only API and scanner scheduler, persistent ledger
+- `public/` offline-capable dashboard UI (no web/CDN chart dependencies)
+- `tests/` deterministic unit tests using sample NFT orderbook data
+
+### References
+- Immutable Orderbook SDK: https://devsupport.immutable.com/build/typescript/usage/orderbook/get-orders/
+- Immutable fill listing: https://devsupport.immutable.com/v1/products/zkevm/orderbook/fill/
+- Immutable ERC20 WETH zkEVM address: https://github.com/immutable/zkevm-bridge-contracts
+- Habbo Collection trading: https://collectibles.habbo.com/imx/
+- NFT marketplace: https://tokentrove.com/collection/Habbo
+
+## GitHub versioning & updater (v1.0.2)
+
+The **Strategy & settings → Software updates** section has a **Check for updates** button. It checks the *latest published GitHub Release*, not unreleased code on `main`. Updates are **manual opt-in**: after review, **Install verified update & restart** downloads the release ZIP, reads its `.sha256` checksum, verifies the bytes, stages dependencies, waits for the scanner to stop, backs up code, installs and restarts. A failed staged dependency install leaves current files untouched. A source backup and updater log are stored in `data/updates`. Live buying must be disarmed before installation, and remains disarmed after restart. The updater **never overwrites** `.env` (wallet configuration) or `data/` (local settings and trade history). SHA-256 guards against corruption but is not a substitute for code review or a secure GitHub account.
+
+GitHub repository: **`furiouspiggy6/habbotest1`**, preferably public to allow unauthenticated release checks. The code intentionally doesn't include your `.env`, private keys, personal trade ledger, `node_modules`, or any other `data/` contents. The project is separate from `habbo-companion` and `habbo-chat-reader`.
+
+After uploading this project into the repository's **main** branch, GitHub Actions (`.github/workflows/publish-release.yml`) runs the tests and creates a release with a version-named ZIP plus checksum. **Each subsequent published update must increase `package.json`'s version**; pushes with the same version skip publishing. GitHub Actions needs permission to write repository contents and workflows must be enabled. If the repository is private, unauthenticated update checks cannot work and require a different authenticated design.
+
+The updater is Windows-specific. `npm install` runs during the update using your installed Node.js 24+ runtime. Since live trades and updater execution could not be tested on a real Windows wallet in this environment, keep live autobuying off until independently reviewed.

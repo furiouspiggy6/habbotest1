@@ -1,0 +1,180 @@
+import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
+import {fileURLToPath} from 'node:url';
+import {analyze,candles,DEFAULT_SETTINGS,validateSettings,demoOrders} from './core.mjs';
+import {scanMarket} from './market.mjs';
+import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
+import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate} from './updates.mjs';
+const HERE=path.dirname(fileURLToPath(import.meta.url));
+const dataDir=path.join(HERE,'data');fs.mkdirSync(dataDir,{recursive:true});
+const storePath=path.join(dataDir,'state.json');
+function dotenv(){try{for(const line of fs.readFileSync(path.join(HERE,'.env'),'utf8').split(/\r?\n/)){
+ const m=line.match(/^\s*([A-Z_][A-Z_0-9]*)\s*=\s*(.*)\s*$/i);
+ if(m&&!Object.hasOwn(process.env,m[1]))process.env[m[1]]=m[2].trim().replace(/^['"]|['"]$/g,'');
+ }}catch{}}
+dotenv();
+function readState(){try{const old=JSON.parse(fs.readFileSync(storePath,'utf8'));return {
+ settings:validateSettings(old.settings),metadata:old.metadata??{},historicalSales:(old.historicalSales??[]).filter(x=>!String(x?.id??'').startsWith('demo-')),
+ paperTrades:old.paperTrades??[],liveTrades:old.liveTrades??[],events:old.events??[]};
+ }catch{return {settings:validateSettings(DEFAULT_SETTINGS),metadata:{},historicalSales:[],paperTrades:[],liveTrades:[],events:[]};}}
+const state=readState();
+let lastCheckedUpdate=null;
+let updating=false;
+let liveArmed=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
+let stats={pages:0,metadata:0,sales:0,truncated:0};
+function save(){const output={settings:state.settings,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),paperTrades:state.paperTrades.slice(-1000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
+ const tmp=storePath+'.tmp';fs.writeFileSync(tmp,JSON.stringify(output,null,2));fs.renameSync(tmp,storePath);}
+function event(kind,message){state.events.unshift({kind,message,time:Date.now()});state.events=state.events.slice(0,400);console.log(`[${kind}] ${message}`);}
+function today(t){return new Date(t).toISOString().slice(0,10);}
+function usedBudget(trades){const d=today(Date.now());return trades.filter(t=>today(t.timestamp)===d && ['completed','pending'].includes(t.status)).reduce((v,t)=>v+t.costEth,0);}
+function dayCount(trades){const d=today(Date.now());return trades.filter(t=>today(t.timestamp)===d && ['completed','pending'].includes(t.status)).length;}
+function safeSummary(){return {
+ appVersion:LOCAL_VERSION,updateRepository:GITHUB_REPO,
+ settings:state.settings,scanning,lastScan:scannedAt,now:Date.now(),armed:liveArmed,
+ hasDedicatedWallet:/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''),
+ liveEnvironmentEnabled:process.env.HABBO_ENABLE_LIVE_BUYS==='YES',warnings,stats,
+ rows:displayRows.slice(0,800),events:state.events.slice(0,60),
+ paperTrades:state.paperTrades.slice(-100).reverse(),liveTrades:state.liveTrades.slice(-100).reverse(),
+ paperSpentToday:usedBudget(state.paperTrades),liveSpentToday:usedBudget(state.liveTrades)
+ };}
+function eligibleForBudget(r,trades){return r.eligible &&
+  !trades.some(t=>t.orderId===r.id)&&
+  usedBudget(trades)+r.totalWithFeesEth<=state.settings.dailyBudgetEth &&
+  dayCount(trades)<state.settings.maxPurchasesPerDay;}
+async function doAutoTrades(){
+ if(!displayRows.length)return;
+ if(state.settings.mode==='demo'&&state.settings.paperAutoBuy){
+  for(const r of displayRows.filter(x=>eligibleForBudget(x,state.paperTrades))){
+   const t={timestamp:Date.now(),orderId:r.id,name:r.name,collection:r.collection,costEth:r.totalWithFeesEth,
+    fairValueEth:r.reference,discount:r.discount,status:'completed',mode:'paper'};
+   state.paperTrades.push(t);event('paper',`SIMULATED buy ${r.name} for ${r.totalWithFeesEth} WETH`);
+  }
+ }
+ if(state.settings.mode==='live'&&liveArmed){
+  if(process.env.HABBO_ENABLE_LIVE_BUYS!=='YES'||!/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||'')){
+   liveArmed=false;event('error','Live buying disarmed: dedicated wallet configuration missing.');return;
+  }
+  setAllowedContracts(state.settings.collections);
+  // One live purchase per scan; never retry an ambiguous or failed order automatically.
+  const target=displayRows.find(x=>eligibleForBudget(x,state.liveTrades)&&
+    x.metadataResolved&&x.sales30d>=state.settings.minSales30d);
+  if(!target)return;
+  const attempt={timestamp:Date.now(),orderId:target.id,name:target.name,collection:target.collection,
+    costEth:target.totalWithFeesEth,fairValueEth:target.reference,discount:target.discount,status:'pending',mode:'live'};
+  state.liveTrades.push(attempt);save();event('live',`Trying LIVE purchase: ${target.name}`);
+  try {const result=await executeLiveBuy(target,state.settings,process.env.HABBO_BOT_PRIVATE_KEY);
+   attempt.status='completed';attempt.hash=result.hash;attempt.costEth=result.priceEth;
+   event('success',`LIVE purchase confirmed ${target.name} — ${result.hash}`);
+  }catch(error){attempt.status='failed';attempt.error=String(error?.message??error).slice(0,280);
+   liveArmed=false;event('error',`LIVE attempt failed; buying DISARMED: ${attempt.error}`);
+  }save();
+ }
+}
+async function scan(){if(scanning||updating)return;scanning=true;
+ try {
+  let listings,filled;
+  if(state.settings.mode==='demo'){
+   ({listings,filled}=demoOrders());warnings=['DEMO: all prices, sales and NFT names are invented examples. No real funds will move.'];stats={pages:0,metadata:8,sales:filled.length,truncated:0};
+  }else{
+   const r=await scanMarket(state.settings,state.metadata);({listings,filled}=r);
+   warnings=r.warnings;stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated};
+   if(r.truncated)warnings.unshift('PARTIAL COVERAGE: not every listing or past sale was downloaded; signals are based on a limited sample.');
+  }
+  const isDemo=state.settings.mode==='demo';
+  if(!isDemo){
+   const seen=new Set(state.historicalSales.map(s=>s.id));
+   for(const s of filled)if(!seen.has(s.id)){state.historicalSales.push(s);seen.add(s.id);}
+  }
+  const threshold=Date.now()-93*86400000;
+  state.historicalSales=state.historicalSales.filter(x=>x.timestamp>=threshold).slice(-16000);
+  // Never persist invented demo fills or use them in a real-world signal.
+  chartSales=isDemo?filled:state.historicalSales;
+  activeListings=listings;
+  displayRows=analyze(listings,chartSales,state.settings);
+  scannedAt=Date.now();
+  if(state.settings.mode==='live'&&stats.sales===0)warnings.push('No completed sale records in this response; trades require credible local sales history.');
+  await doAutoTrades();save();event('scan',`${state.settings.mode.toUpperCase()}: ${listings.length} offers, ${filled.length} filled orders fetched, ${displayRows.filter(x=>x.eligible).length} candidates.`);
+ }catch(e){warnings=[`Scan error: ${String(e?.message??e)}`];event('error',warnings[0]);}
+ finally{scanning=false;}
+}
+function schedule(){if(serverTimer)clearInterval(serverTimer);serverTimer=setInterval(()=>{scan().catch(e=>event('error',String(e)));},state.settings.refreshSeconds*1000);}
+function send(res,status,data,contentType='application/json; charset=utf-8'){
+ const buf=typeof data==='string'?data:JSON.stringify(data);
+ res.writeHead(status,{'Content-Type':contentType,'Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Content-Security-Policy':contentType.startsWith('text/html')?"default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self'; img-src 'self' https: data:; connect-src 'self'; object-src 'none'; base-uri 'none'":"default-src 'none'"});res.end(buf);
+}
+const PORT=Number(process.env.PORT||38571);
+function jsonBody(req){return new Promise((resolve,reject)=>{let b='';req.on('data',s=>{b+=s;if(b.length>250000){reject(new Error('Request too large'));req.destroy();}});req.on('end',()=>{try{resolve(JSON.parse(b||'{}'));}catch{reject(new Error('Invalid JSON'));}});req.on('error',reject);});}
+const assets=new Map([['/','public/index.html'],['/app.js','public/app.js'],['/style.css','public/style.css']]);
+const server=http.createServer(async(req,res)=>{
+ try{
+  const uri=new URL(req.url,`http://127.0.0.1:${PORT}`);
+  if(req.method==='GET'&&assets.has(uri.pathname)){
+   const file=path.join(HERE,assets.get(uri.pathname));return send(res,200,fs.readFileSync(file,'utf8'),uri.pathname.endsWith('.js')?'text/javascript; charset=utf-8':uri.pathname.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');
+  }
+  if(req.method==='GET'&&uri.pathname==='/api/state')return send(res,200,safeSummary());
+  if(req.method==='GET'&&uri.pathname==='/api/update/check'){
+   try {lastCheckedUpdate=await checkForUpdates();return send(res,200,lastCheckedUpdate);} 
+   catch(err){lastCheckedUpdate=null;return send(res,503,{error:String(err.message||err),repo:GITHUB_REPO});}
+  }
+  if(req.method==='GET'&&uri.pathname==='/api/candles'){
+   const key=uri.searchParams.get('key');if(!key||key.length>250)return send(res,400,{error:'Invalid key'});
+   const chartHistory=state.settings.mode==='demo'?chartSales:state.historicalSales;
+   return send(res,200,{key,candles:candles(chartHistory,key),sales:chartHistory.filter(x=>x.key===key).slice(-180).map(({price,timestamp,id})=>({price,timestamp,id}))});
+  }
+  if(req.method==='GET'&&uri.pathname==='/api/export.csv'){
+   const header='collection,name,token_id,price_weth,median_weth,discount_pct,net_edge_pct,sales_30d,eligible,order_id\n';
+   const quote=x=>'"'+String(x??'').replaceAll('"','""')+'"';
+   const csv=header+displayRows.map(r=>[r.collection,r.name,r.tokenId,r.price,r.reference,r.discount,r.netEdge,r.sales30d,r.eligible,r.id].map(quote).join(',')).join('\n');
+   return send(res,200,csv,'text/csv; charset=utf-8');
+  }
+  if(req.method!=='POST'||!['/api/settings','/api/refresh','/api/arm','/api/disarm','/api/reset-paper','/api/update/install'].includes(uri.pathname))return send(res,404,{error:'Not found'});
+  // Local-only API; prevent another browser tab/site from posting by cross-site fetch/forms.
+  const origin=req.headers.origin;if(origin&&origin!==`http://127.0.0.1:${PORT}`&&origin!==`http://localhost:${PORT}`)return send(res,403,{error:'Invalid origin'});
+  if(req.headers['content-type']?.split(';')[0]!=='application/json')return send(res,415,{error:'Use application/json'});
+  const body=await jsonBody(req);
+  if(uri.pathname==='/api/update/install'){
+   if(process.platform!=='win32')return send(res,400,{error:'Update installation is currently Windows-only.'});
+   if(liveArmed)return send(res,409,{error:'Disarm real-money autobuying before updating.'});
+   if(scanning)return send(res,409,{error:'A market scan is running; retry once the scan finishes.'});
+   if(updating)return send(res,409,{error:'Update already in progress.'});
+   if(body.confirm!=='INSTALL VERIFIED UPDATE')return send(res,400,{error:'Explicit update confirmation is required.'});
+   updating=true;
+   try {
+    // Do not trust an update check cached in the browser; query GitHub again.
+    const candidate=await checkForUpdates();
+    if(!candidate.available)throw Error('No newer published release found.');
+    if(lastCheckedUpdate?.latest!==candidate.latest)throw Error('Release changed since your last check. Check updates again first.');
+    const downloaded=await prepareUpdate(candidate,dataDir);
+    const result=await startWindowsUpdate(downloaded);
+    liveArmed=false;event('system',`Installing verified update v${downloaded.version}; shutting down the scanner.`);
+    send(res,200,result);
+    setTimeout(()=>{if(serverTimer)clearInterval(serverTimer);save();server.close(()=>process.exit(0));},400);
+    return;
+   } catch(err) {updating=false;return send(res,400,{error:String(err.message||err)});}
+  }
+  if(uri.pathname==='/api/settings'){
+   if(updating)return send(res,409,{error:'Update installation is in progress.'});
+   const updated=validateSettings(body);const changed=updated.mode!==state.settings.mode;
+   if(changed){liveArmed=false;displayRows=[];activeListings=[];chartSales=[];scannedAt=0;warnings=[];}
+   state.settings=updated;save();schedule();event('system',`Settings saved — ${updated.mode.toUpperCase()} mode`);
+   void scan();return send(res,200,{ok:true});
+  }
+  if(uri.pathname==='/api/refresh'){void scan();return send(res,200,{ok:true});}
+  if(uri.pathname==='/api/disarm'){liveArmed=false;event('system','Live autobuyer disarmed');return send(res,200,{ok:true});}
+  if(uri.pathname==='/api/reset-paper'){
+   if(body.phrase!=='RESET PAPER')return send(res,400,{error:'Wrong confirmation phrase'});
+   state.paperTrades=[];save();event('system','Paper trading log cleared');return send(res,200,{ok:true});
+  }
+  if(uri.pathname==='/api/arm'){
+   if(updating)return send(res,409,{error:'Cannot arm live buying during update installation.'});
+   if(state.settings.mode!=='live'||body.phrase!=='ENABLE LIVE NFT BUYING')return send(res,400,{error:'Switch to LIVE mode and type the exact confirmation phrase.'});
+   if(process.env.HABBO_ENABLE_LIVE_BUYS!=='YES')return send(res,400,{error:'Live buying disabled by .env safeguard.'});
+   if(!/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''))return send(res,400,{error:'No valid dedicated wallet private key configured.'});
+   if(!scannedAt||Date.now()-scannedAt>state.settings.refreshSeconds*3000||!stats.sales)return send(res,400,{error:'Refresh live market data first; verified sales history is required.'});
+   liveArmed=true;event('system','LIVE auto-buy ARMED until you disarm, restart or an order fails');return send(res,200,{ok:true});
+  }
+ }catch(e){return send(res,400,{error:String(e?.message??e)});}
+});
+server.listen(PORT,'127.0.0.1',()=>{console.log(`\nHabbo NFT Market Radar: http://127.0.0.1:${PORT}\n`);schedule();void scan();});
+process.on('SIGINT',()=>{liveArmed=false;save();server.close(()=>process.exit(0));});

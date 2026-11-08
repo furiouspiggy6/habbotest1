@@ -1,0 +1,56 @@
+name: Test and publish Windows updates
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+      - name: Node.js 24
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+      - name: Run unit tests
+        run: npm test
+      - name: Read and validate version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo 'Invalid package version'; exit 1; fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Package Windows source and checksum
+        shell: bash
+        run: |
+          VERSION='${{ steps.version.outputs.version }}'
+          ZIP="Habbo_NFT_Market_Radar_Windows_v${VERSION}.zip"
+          mkdir -p dist
+          # Zip excludes private .env, app state, installed modules and Git internals.
+          zip -q -r "dist/$ZIP" . \
+            -x '.git/*' 'dist/*' '.github/*' 'data/*' 'node_modules/*' '.env' '*.log' \
+               '*.zip' '*.sha256' '**/.DS_Store'
+          (cd dist && sha256sum "$ZIP" > "$ZIP.sha256")
+      - name: Publish new version (skip if already released)
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            echo "Release $TAG already exists; bump package.json version before publishing another update."
+            exit 0
+          fi
+          gh release create "$TAG" \
+            "dist/Habbo_NFT_Market_Radar_Windows_v${VERSION}.zip" \
+            "dist/Habbo_NFT_Market_Radar_Windows_v${VERSION}.zip.sha256" \
+            --target "$GITHUB_SHA" --title "Habbo NFT Market Radar $TAG" \
+            --notes "Windows source distribution. Requires Node.js 24+. Local settings, records, and wallet configuration are not included. Live trades are experimental and unverified."
