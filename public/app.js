@@ -58,7 +58,7 @@ function renderBanner(){
  $('connectionPill').innerHTML='<span class="pulse-dot"></span> '+(data.scanning?'SCANNING':hasListings?'LIVE LISTINGS':connected?'CONNECTED · EMPTY':'LIVE OFFLINE');
 }
 function renderStats(){$('statListings').textContent=data.listingCount??0;$('statOpportunities').textContent=data.candidateCount??0;
- $('statSales').textContent=data.stats?.historicalSales??data.stats?.sales??0;$('statSpend').textContent=audCash(data.liveSpentToday);
+ $('statSales').textContent=data.stats?.historicalSales??data.stats?.sales??0;$('statSpend').textContent=audLimit(data.liveSpentTodayAud);
  $('riskLimit').textContent=audLimit(data.audLimits?.maximumPriceAud);$('riskDiscount').textContent=data.settings.minDiscountPct+'%';
  if($('fiatRateText')){
   const q=data.fiatQuote;
@@ -216,10 +216,10 @@ async function loadChart(force=false){const r=selectedRow();if(!r){drawChart([],
  if(!force&&selectedKey===r.key&&Date.now()-lastChartRequest<20000){if(currentChart)drawChart(currentChart,days);return;}
  selectedKey=r.key;lastChartRequest=Date.now();try{const result=await api('/api/candles?key='+encodeURIComponent(r.key));if(selectedKey!==result.key)return;currentChart=result.candles;drawChart(currentChart,days);}catch(e){$('chartHint').textContent=e.message;}}
 function renderTrades(){if(!data)return;
- $('liveSpent').textContent=audCash(data.liveSpentToday);
+ $('liveSpent').textContent=audLimit(data.liveSpentTodayAud);
  $('liveCount').textContent=data.liveTrades.filter(t=>t.status==='completed').length;
  const all=[...data.liveTrades].sort((a,b)=>b.timestamp-a.timestamp).slice(0,100);
- $('tradeLog').innerHTML=all.length?all.map(t=>`<div class="log-line"><div><div class="log-main">${htmlSafe(t.name)} <small style="color:#869ab0">· LIVE</small></div><div class="log-sub">${new Date(t.timestamp).toLocaleString()} · ${audCash(t.costEth)} ${t.error?'· '+htmlSafe(t.error):''} ${t.hash?'· '+htmlSafe(t.hash):''}</div></div><b class="log-status ${t.status==='failed'?'error':''}">${htmlSafe(t.status.toUpperCase())}</b></div>`).join(''):'<div class="empty">No trades recorded yet.</div>';
+ $('tradeLog').innerHTML=all.length?all.map(t=>`<div class="log-line"><div><div class="log-main">${htmlSafe(t.name)} <small style="color:#869ab0">· LIVE</small></div><div class="log-sub">${new Date(t.timestamp).toLocaleString()} · ${t.costAud!==null&&t.costAud!==undefined?audLimit(t.costAud):audCash(t.costEth)} ${t.error?'· '+htmlSafe(t.error):''} ${t.hash?'· '+htmlSafe(t.hash):''}</div></div><b class="log-status ${t.status==='failed'?'error':''}">${htmlSafe(t.status.toUpperCase())}</b></div>`).join(''):'<div class="empty">No trades recorded yet.</div>';
  $('eventLog').innerHTML=data.events.length?data.events.slice(0,30).map(e=>`<div class="log-line"><div><div class="log-main">${htmlSafe(e.message)}</div><div class="log-sub">${new Date(e.time).toLocaleString()}</div></div><b class="log-status ${e.kind==='error'?'error':''}">${htmlSafe(e.kind.toUpperCase())}</b></div>`).join(''):'<div class="empty">No events recorded.</div>';
 }
 const audFields=['maximumPriceAud','dailyBudgetAud','minPriceAud'];
