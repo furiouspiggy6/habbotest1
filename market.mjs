@@ -106,17 +106,42 @@ function metadataFromNFT(response){
  if(typeof image!=='string'||!/^https:\/\//.test(image))image='';
  return name?{name:String(name).slice(0,100),metadataId:metadataId?String(metadataId):null,image}:null;
 }
-export async function resolveMetadata(client,orders,cache,limit=80){
- const items=[...new Map(orders.map(o=>[`${o.contract}|${o.tokenId}`,o])).values()];
- const needed=items.filter(o=>!cache[`${o.contract}|${o.tokenId}`]).slice(0,limit);
+// Cache failed NFT lookups for ten minutes. Otherwise malformed/removed NFTs
+// at the start of a page block all later metadata lookups indefinitely.
+const metadataRetry = new WeakMap();
+const metadataKey=o=>`${o.contract}|${o.tokenId}`;
+function retryReady(cache,key,now=Date.now()){
+ return !cache[key] && (metadataRetry.get(cache)?.get(key)??0)<=now;
+}
+/** Resolve live listings and matching completed sales in balanced batches.
+ * Never spend the entire budget on active orders while historical sales remain unidentified.
+ */
+export function prioritizedMetadataOrders(listings,filled,cache,limit=120){
+ const active=[...listings].sort((a,b)=>a.price-b.price).filter(o=>retryReady(cache,metadataKey(o)));
+ const sales=[...filled].sort((a,b)=>b.timestamp-a.timestamp).filter(o=>retryReady(cache,metadataKey(o)));
+ const picked=[],seen=new Set();let a=0,b=0;
+ const add=o=>{if(o&&!seen.has(metadataKey(o))){picked.push(o);seen.add(metadataKey(o));}};
+ while(picked.length<limit&&(a<active.length||b<sales.length)){
+  if(a<active.length)add(active[a++]);
+  if(picked.length>=limit)break;
+  if(b<sales.length)add(sales[b++]);
+ }
+ return picked;
+}
+export async function resolveMetadata(client,orders,cache,limit=120){
+ const items=[...new Map(orders.map(o=>[metadataKey(o),o])).values()];
+ let cooldown=metadataRetry.get(cache);
+ if(!cooldown){cooldown=new Map();metadataRetry.set(cache,cooldown);}
+ const needed=items.filter(o=>retryReady(cache,metadataKey(o))).slice(0,limit);
  let ok=0,failed=0,index=0,firstError='';
- async function worker(){while(index<needed.length){const o=needed[index++];try{
+ async function worker(){while(index<needed.length){const o=needed[index++],key=metadataKey(o);try{
   const r=await client.getNFT({chainName,contractAddress:o.contract,tokenId:o.tokenId});
   const m=metadataFromNFT(r);
-  if(m){cache[`${o.contract}|${o.tokenId}`]=m;ok++;}else failed++;
-  }catch(err){failed++;if(!firstError)firstError=String(err?.message??err).slice(0,170);}await sleep(65);}}
+  if(m){cache[key]=m;cooldown.delete(key);ok++;}
+  else{failed++;cooldown.set(key,Date.now()+10*60*1000);}
+  }catch(err){failed++;cooldown.set(key,Date.now()+10*60*1000);if(!firstError)firstError=String(err?.message??err).slice(0,170);}await sleep(65);}}
  await Promise.all(Array.from({length:Math.min(4,needed.length)},worker));
- return {cache,ok,failed,firstError,remaining:items.filter(o=>!cache[`${o.contract}|${o.tokenId}`]).length};
+ return {cache,ok,failed,attempted:needed.length,firstError,remaining:items.filter(o=>!cache[metadataKey(o)]).length};
 }
 export async function scanMarket(settings,cache){
  const clients=createReadClients(settings.publishableKey);
@@ -141,9 +166,15 @@ export async function scanMarket(settings,cache){
   else if(received>0)warnings.unshift(`Immutable returned ${received} raw orders, but none passed the WETH NFT filters. Filter reasons: ${JSON.stringify(rejected).slice(0,250)}. Returned currencies: ${[...quotes].slice(0,6).join(', ')||'unknown'}.`);
   else warnings.unshift('Immutable returned zero orders for the selected collections. Check contracts, API key, and marketplace coverage.');
  }
- const meta=await resolveMetadata(clients.blockchainData,[...listings,...filled],cache);
+ const prioritized=prioritizedMetadataOrders(listings,filled,cache,120);
+ const meta=await resolveMetadata(clients.blockchainData,prioritized,cache,120);
  listings=hydrateNames(listings,cache);filled=hydrateNames(filled,cache);
- if(meta.remaining)warnings.push(`${meta.remaining} NFT token IDs have no verified metadata yet, so those items cannot trigger buys.${meta.firstError?' Metadata API error: '+meta.firstError:''}`);
+ const coverage={activeResolved:listings.filter(o=>o.metadataResolved).length,activeTotal:listings.length,
+  salesResolved:filled.filter(o=>o.metadataResolved).length,salesTotal:filled.length,
+  fetchedThisScan:meta.ok,failedThisScan:meta.failed,attemptedThisScan:meta.attempted};
+ const remainingKeys=new Set([...listings,...filled].filter(o=>!o.metadataResolved).map(metadataKey));
+ meta.remaining=remainingKeys.size;
+ if(meta.remaining)warnings.push(`NFT identity indexing in progress: ${coverage.activeResolved}/${coverage.activeTotal} live listings and ${coverage.salesResolved}/${coverage.salesTotal} completed sales have verified metadata (${meta.remaining} token IDs outstanding).${meta.firstError?' Metadata API error: '+meta.firstError:''}`);
  if(filled.length===0)warnings.push('No usable completed orders retrieved. No purchase signals will be generated.');
- return {listings,filled,warnings,meta,pages,truncated,received,failedRequests,successfulRequests,quoteTypes:[...quotes],rejected,diagnostics};
+ return {listings,filled,warnings,meta,coverage,pages,truncated,received,failedRequests,successfulRequests,quoteTypes:[...quotes],rejected,diagnostics};
 }
