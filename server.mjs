@@ -32,9 +32,9 @@ const orderVerificationCache=new Map();
 const stackFloorCache=new Map();
 async function verifyReadOnlyStackFloor(row){
  const now=Date.now();
- const match=typeof row.key==='string'?row.key.match(/\\|metadata:(.+)$/):null;
- if(!match)return {status:'unavailable',checkedAt:now,reason:'No verified metadata stack ID was provided for this NFT'};
- const stackId=match[1];
+ const prefix=row.contract+'|metadata:';
+ const stackId=typeof row.key==='string'&&row.key.startsWith(prefix)?row.key.slice(prefix.length):null;
+ if(!stackId)return {status:'unavailable',checkedAt:now,reason:'No verified metadata stack ID was provided for this NFT'};
  const key=row.contract+'|'+stackId,cached=stackFloorCache.get(key);
  if(cached&&now-cached.checkedAt<2*60_000)return cached;
  let floor;
