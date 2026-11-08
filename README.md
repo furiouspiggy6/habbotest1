@@ -314,3 +314,22 @@ Eligible opportunities are ranked primarily by opportunity score and then estima
 **Optional deep market scans:** Keep your usual page depth (default 20) for regular refreshes, and enable scheduled deeper ACTIVE scanning under Data collection. Default deep depth is 40 pages/collection, configurable 1–80; frequency defaults to every 30 minutes, configurable 15–1440. Scheduled scans begin after the selected interval rather than immediately on app startup. The *Run deep scan now* button can initiate a one-time deep scan even if the recurring option is disabled; manual deep scans require disarming the autobuyer. Deep scans fetch new current listings rather than merging stale historical order snapshots. The last scan mode, pages searched, last deep completion and next scheduled deep scan are reported in settings. Increasing depth increases Immutable API requests and cannot guarantee full coverage.
 
 **Live trading caution:** Experimental settlement code remains unverified in production. OpenSea Ethereum Habbo Avatars remain watch-only. For manual inspection, compare the exact order and costs with TokenTrove; independent TokenTrove and verified buy-bid feeds are not yet connected. Keep live buying disarmed until you personally validate the estimates and execution with a very small test.
+
+## v2.0.20 — realistic resale ceiling and loss prevention
+
+Previous versions could declare a cheap-looking item a profitable buying candidate solely because a 30-day historical completed-sale median exceeded its current asking price. For example, a collectible with a current A$27.87 cost, historical A$48.75 median and dozens of competing asks around A$28–30 could falsely show A$17+ projected profit. **This release corrects both the profit display and actual live buying eligibility.**
+
+The conservative resale ceiling per verified collectible is the **lowest** of:
+- its verified 30-day historical-sale median (existing outlier handling preserved);
+- its verified seven-day sale median when at least three matching completed sales exist within that week;
+- **98% of the next cheapest distinct, currently scanned ACTIVE listing's seller ask**, to model a 2% undercut. Only verified matching metadata identity and live single-unit orders with valid asking prices are comparable.
+
+The seller's ask is *not* a guarantee anyone will buy; this is a ceiling for cautious listing-based projection, **not executable bid liquidity**. The app does **not** invent verified buy offers or TokenTrove quotes. When no distinct comparable current asking order was seen, the historical-based profit remains a provisional WATCH projection, **never an autobuy candidate**. Partial orderbook coverage can still hide better competing offers, so this is not a complete-market guarantee.
+
+Estimated AUD profit, net edge, and **conservative resale discount** now use the ceiling after estimated resale fees, original buyer fees and any configured extra-cost allowance. The optional opportunity score also uses this revised (possibly negative) profit, and loss-making opportunities have their scores capped to avoid misleading high scores. The previous 30-day median and its historical gross-profit projection remain visible in Inspect/CSV as historical comparison **only**.
+
+The scanner displays the realistic resale ceiling rather than the 30-day median in its main column. Detailed inspection reports the historical median, current next asking price, the assumed 2% undercut, seven-day sales median if available, source of the tightest cap, conservative discount, and AUD break-even selling price.
+
+**Before live buying**, Market Radar additionally requests a fresh independent Immutable stack floor rather than relying on the cached inspection view. If the independent floor is unavailable or a cheaper fee-inclusive stack order is found, it blocks the transaction and disarms. The live fulfillment logic rechecks its fee-adjusted minimum profit, conservative resale discount, and net edge against the **conservative resale ceiling**, not the historical median, before and after building settlement. This remains experimental and not independently validated with real money.
+
+Estimated profits still depend on verified data coverage, seller asks, assumed selling fees, FX rates and the user's manually configured extra-cost reserve. They are **not guaranteed achievable sales**, and no direct TokenTrove feed or executable bid book is integrated. Keep live buying disarmed until independently validated.
