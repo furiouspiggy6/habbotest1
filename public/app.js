@@ -99,11 +99,11 @@ function renderStats(){$('statListings').textContent=data.listingCount??0;$('sta
  const canBuy=data.armed;$('autobuyIndicator').textContent=canBuy?'● LIVE ARMED':'● DISARMED';
  $('autobuyIndicator').style.color=canBuy?'#f87982':'#55e0bc';
  $('engineText').textContent=canBuy?'REAL MONEY purchasing is active. One eligible NFT at most per scan; it disarms on error or restart.':'Live market scanner is running. Real buying is OFF until separately enabled with a dedicated wallet and confirmation phrase.';
- $('coverageText').textContent=`${data.listingCount??0} LIVE offers across ${data.settings.collections.filter(c=>c.enabled).length} collections · up to ${data.settings.pagesPerCollection} ACTIVE pages per collection · ${data.stats.pages} pages read · ${data.stats.truncated?'PARTIAL coverage':'page scan complete'} · ${data.stats.failedRequests??0} failed requests`;
+ $('coverageText').textContent=`${data.listingCount??0} LIVE offers across ${data.settings.collections.filter(c=>c.enabled).length} collections · up to ${data.settings.pagesPerCollection} ACTIVE pages per collection · ${data.stats.pages} pages read · ${data.stats.truncated?'PARTIAL coverage':'page scan complete'} · ${data.stats.failedRequests??0} failed requests · ${data.deepScan?.lastMode==='deep'?'DEEP':'regular'} scan (${data.deepScan?.scanPages??data.settings.pagesPerCollection} pages limit)`;
  const cv=data.stats.coverage,cd=data.stats.candidateDiagnostics;
  const coverage=cv?`Verified NFT identity: ${cv.activeResolved}/${cv.activeTotal} active · ${cv.salesResolved}/${cv.salesTotal} sold · ${cv.fetchedThisScan} resolved this scan, ${cv.failedThisScan} failed.`:'Metadata coverage not available yet.';
  const historyLine=`Historical sales: ${data.stats.historyPending??0} collection(s) still indexing older pages; ${data.stats.historyCompleted??0} reached the end this scan. ${data.stats.historicalSales??0} unique sales cached locally.`;
- const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.belowEstimatedProfit??0} below A$ profit minimum; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
+ const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.belowEstimatedProfit??0} below A$ profit minimum; ${cd.belowOpportunityScore??0} below optional opportunity score; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
  $('scanDiagnostics').textContent=([`Immutable scan segments: ${data.stats.successfulRequests??0} completed / ${data.stats.failedRequests??0} failed or interrupted. ${data.stats.rawOrders??0} raw orders received.`,coverage,historyLine,reasons,...data.warnings,`Rejected orders: ${JSON.stringify(data.stats.rejected||{})}`, ...((data.stats.diagnostics||[]).map(d=>`${d.collection} ${d.status}: ${d.error||`${d.accepted}/${d.raw} accepted (${d.pages} pages)${d.shape?' shape='+JSON.stringify(d.shape):''}`}`))].join('\n')); 
 }
 function withinAudRange(row){
@@ -121,7 +121,7 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
   (signal==='all'||(signal==='eligible'?x.eligible:withinAudRange(x)))&&
   (!$('profitOnly').checked||minimumProfit<=0||
    (Number.isFinite(Number(x.estimatedProfitAud))&&x.estimatedProfitAud!==null&&x.estimatedProfitAud!==undefined&&x.estimatedProfitAud+1e-8>=minimumProfit)));
- if($('profitOnly').checked&&minimumProfit>0)matched.sort((a,b)=>(b.estimatedProfitAud??-Infinity)-(a.estimatedProfitAud??-Infinity));
+ if($('profitOnly').checked&&minimumProfit>0)matched.sort((a,b)=>Number(b.eligible===true)-Number(a.eligible===true)||(b.opportunityScore??-1)-(a.opportunityScore??-1)||(b.estimatedProfitAud??-1e12)-(a.estimatedProfitAud??-1e12));
  const grouped=$('cheapestOnly').checked;
  const found=grouped?cheapestPerCollectible(matched):matched;
  visibleRows=found;
@@ -137,7 +137,7 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
  $('pageSummary').textContent=found.length?`Showing ${start+1}–${start+limited.length} of ${found.length} · Page ${pageIndex+1}/${totalPages}`:'No matching listings';
  $('pagePrev').disabled=pageIndex===0;
  $('pageNext').disabled=pageIndex>=totalPages-1;
- body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.totalWithFeesEth)}</td><td class="${r.estimatedProfitAud!==null&&r.estimatedProfitAud>=0?'positive':'neutral'}">${r.estimatedProfitAud===null||r.estimatedProfitAud===undefined?'—':audLimit(r.estimatedProfitAud)}</td><td>${audCash(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td><td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
+ body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.totalWithFeesEth)}</td><td class="${r.estimatedProfitAud!==null&&r.estimatedProfitAud>=0?'positive':'neutral'}">${r.estimatedProfitAud===null||r.estimatedProfitAud===undefined?'—':audLimit(r.estimatedProfitAud)}</td><td><span class="opportunity-score ${r.opportunityScore!==null&&r.opportunityScore>=70?'strong':''}" title="${htmlSafe((r.scoreCautions||[]).join(' | ')||'Heuristic score, not a resale guarantee')}">${r.opportunityScore===null?'—':r.opportunityScore+'/100'}</span><small class="score-confidence">${htmlSafe((r.confidence||'low').toUpperCase())} confidence</small></td><td>${audCash(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td><td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
  body.querySelectorAll('tr').forEach(tr=>tr.addEventListener('click',()=>{selectedId=tr.dataset.order;renderMarket();void loadChart(true);}));
  body.querySelectorAll('.row-inspect').forEach(btn=>btn.addEventListener('click',event=>{
   event.stopPropagation();selectedId=btn.dataset.inspectOrder;
@@ -226,7 +226,9 @@ function renderInspection(info){
    ${metric('Seller asking price (excl. fees)',inspectPrice(r.price))}
    ${metric('30D reference / unit',ref)}
    ${metric('Discount vs reference',inspectPct(r.discount),r.discount>=0?'good':'bad')}
-   ${metric('Estimated net profit',inspectPrice(estimateProfit),profitClass)}
+   ${metric('Estimated net profit (after extra costs)',r.estimatedProfitAud===null?'—':audLimit(r.estimatedProfitAud),r.estimatedProfitAud>=0?'good':'bad')}
+   ${metric('Opportunity score',r.opportunityScore===null?'—':r.opportunityScore+'/100')}
+   ${metric('Liquidity / confidence',String(r.liquidity||'low').toUpperCase()+' / '+String(r.confidence||'low').toUpperCase())}
   </div>
   <div class="inspect-rows">
    ${inspectPair('Quantity',String(r.quantity))}
@@ -247,6 +249,13 @@ function renderInspection(info){
    ${inspectPair('Dollar minimum satisfied',r.fiatMinPassed?'Yes':'No — listing excluded')}
    ${inspectPair('Profit requirement satisfied',r.minProfitPassed?'Yes':'No — below configured A$ minimum')}
    ${inspectPair('Assumed resale fee',inspectPct(estimate.resaleFeePct))}
+    ${inspectPair('Reserved extra costs (AUD)',audLimit(r.estimatedExtraCostsAud??0))}
+    ${inspectPair('Optional minimum score satisfied',r.scorePassed?'Yes':'No — below your score minimum')}
+    ${inspectPair('Verified comparable sales in 7D',String(r.verifiedSales7d??0))}
+    ${inspectPair('Observed competing active offers',String(Math.max(0,(r.observedActiveOffers??1)-1)))}
+    ${inspectPair('Observed cheaper competing offers',String(r.observedCheaperOffers??0))}
+    ${inspectPair('7D median vs 30D median',r.trendPct===null?'Insufficient recent sales':inspectPct(r.trendPct))}
+    ${inspectPair('Verified live buy-offer depth','Unavailable — not integrated')}
    ${inspectPair('Est. resale proceeds after fee',inspectPrice(estimate.expectedProceedsEth))}
    ${inspectPair('Est. return on purchase cost',inspectPct(estimate.estimatedRoiPct))}
    ${inspectPair('Completed comparable sales in 30D',String(h.count30d))}
@@ -254,7 +263,10 @@ function renderInspection(info){
    ${inspectPair('Last completed scan',inspectDate(info.lastScan))}
    ${inspectPair('Listing price filter',r.eligible?'Qualified':'Review strategy limits')}
   </div>
-  <h3 class="inspect-section-title">Comparable completed sales — last 90 days</h3>
+  <h3 class="inspect-section-title">Opportunity scoring and risks</h3>
+   <p class="inspect-meta">Heuristic ranking only: profit after your configured fee/cost allowance, completed-sale frequency and recency, observed competing ACTIVE orders, and 7-day versus 30-day price movement. It is not a resale probability.</p>
+   <div class="inspect-warning">${(r.scoreCautions&&r.scoreCautions.length?r.scoreCautions:['No additional score warnings identified in the scanned data.']).map(htmlSafe).join(' · ')} Unobserved listings and bids may affect liquidity.</div>
+   <h3 class="inspect-section-title">Comparable completed sales — last 90 days</h3>
   <p class="inspect-meta">${h.count30d} within 30 days; ${h.count90d} within 90 days. These are other orders with matching verified collectible identity, not necessarily sales of this token ID.</p>
   <div class="inspect-evidence">${h.sales.length?`<table><thead><tr><th>Immutable order updated</th><th>Sold unit price</th><th>Token ID</th><th>Order ID</th></tr></thead><tbody>${historyRows}</tbody></table>`:'<div class="inspect-status">No verified matching FILLED records in the last 90 days.</div>'}</div>
   ${h.limited?`<p class="inspect-meta">Showing the newest ${h.returned} of ${h.count90d} verified matches.</p>`:''}
@@ -263,7 +275,7 @@ function renderInspection(info){
    <button class="button ghost inspect-copy" type="button" data-copy="${htmlSafe(r.tokenId)}">Copy token ID</button>
    <button class="button ghost inspect-copy" type="button" data-copy="${htmlSafe(r.id)}">Copy order ID</button>
   </div>
-  <div class="inspect-warning">${info.coveragePartial?'The Immutable scan has partial active-listing coverage, so a cheaper marketplace offer may be missing from this feed. ':''}${stackFloor?.status==='available'&&stackFloor.priceEth<r.price-1e-9?'Immutable\'s separately indexed stack floor shows a cheaper WETH-priced offer than the selected cached listing. Compare both order IDs before any purchase. ':''}TokenTrove's AUD conversion and marketplace order may differ from this app. Compare the underlying ETH/WETH price and exact order rather than AUD alone. No TokenTrove live price was retrieved automatically. AUD estimates use the current ETH/AUD rate, not the exchange rate on historical sale dates. Immutable settlement is in WETH. Estimates assume resale at the 30-day reference price and subtract the configured ${htmlSafe(inspectPct(estimate.resaleFeePct))} resale fee and the listing's observed buyer fees. They exclude gas, slippage, future price changes, additional marketplace charges, and time-to-sell. A buyer is not guaranteed. Immutable FILLED order update timestamps may differ from actual settlement times. Data and live order availability can change after the last scan. Always confirm the offer on TokenTrove.</div>
+  <div class="inspect-warning">${info.coveragePartial?'The Immutable scan has partial active-listing coverage, so a cheaper marketplace offer may be missing from this feed. ':''}${stackFloor?.status==='available'&&stackFloor.priceEth<r.price-1e-9?'Immutable\'s separately indexed stack floor shows a cheaper WETH-priced offer than the selected cached listing. Compare both order IDs before any purchase. ':''}TokenTrove's AUD conversion and marketplace order may differ from this app. Compare the underlying ETH/WETH price and exact order rather than AUD alone. No TokenTrove live price was retrieved automatically. AUD estimates use the current ETH/AUD rate, not the exchange rate on historical sale dates. Immutable settlement is in WETH. Estimates assume resale at the 30-day reference price and subtract the configured ${htmlSafe(inspectPct(estimate.resaleFeePct))} resale fee and the listing's observed buyer fees. They exclude unbudgeted gas, slippage, future price changes, additional marketplace charges, and time-to-sell. Any configured extra cost reserve is deducted from the AUD profit display, but is not a live gas quote. A buyer is not guaranteed. Immutable FILLED order update timestamps may differ from actual settlement times. Data and live order availability can change after the last scan. Always confirm the offer on TokenTrove.</div>
   <div class="inspect-meta">Orderbook source: Immutable zkEVM · Cached scan ${htmlSafe(listingDate(info.lastScan))} · Rechecked ${htmlSafe(listingDate(liveCheck?.checkedAt))}<br>Collection contract: ${htmlSafe(r.contract)}<br>Immutable order ID: ${htmlSafe(r.id)}<br>The TokenTrove link opens a collection search, not a verified deep link to this exact order.</div>`;
  $('inspectContent').querySelectorAll('.inspect-copy').forEach(btn=>btn.addEventListener('click',async()=>{
   try{await navigator.clipboard.writeText(btn.dataset.copy);toast('Copied to clipboard');}
@@ -332,7 +344,7 @@ function renderTrades(){if(!data)return;
  $('eventLog').innerHTML=data.events.length?data.events.slice(0,30).map(e=>`<div class="log-line"><div><div class="log-main">${htmlSafe(e.message)}</div><div class="log-sub">${new Date(e.time).toLocaleString()}</div></div><b class="log-status ${e.kind==='error'?'error':''}">${htmlSafe(e.kind.toUpperCase())}</b></div>`).join(''):'<div class="empty">No events recorded.</div>';
 }
 const audFields=['maximumPriceAud','dailyBudgetAud','minPriceAud'];
-const fields=['minDiscountPct','minSales30d','minNetEdgePct','estimatedResaleFeesPct','minEstimatedProfitAud','minimumFiatPrice','maxPurchasesPerDay','refreshSeconds','pagesPerCollection'];
+const fields=['minDiscountPct','minSales30d','minNetEdgePct','estimatedResaleFeesPct','minEstimatedProfitAud','minOpportunityScore','estimatedExtraCostsAud','minimumFiatPrice','maxPurchasesPerDay','refreshSeconds','pagesPerCollection','deepScanPages','deepScanIntervalMinutes'];
 function renderOpenSeaConnection(){
  if(!data)return;
  const c=data.openSeaConnection??{};
@@ -357,6 +369,7 @@ function renderOpenSeaConnection(){
 }
 function fillSettings(){const s=data.settings;
  fields.forEach(k=>$(k).value=s[k]);
+ $('deepScanEnabled').checked=s.deepScanEnabled===true;
  $('openSeaApiKey').value='';
  $('openSeaApiKey').placeholder=data.openSeaKeyConfigured?'Saved — paste to replace':'Paste OpenSea API key to enable';
  $('openSeaKeyHelp').textContent=data.openSeaKeyConfigured
@@ -365,13 +378,20 @@ function fillSettings(){const s=data.settings;
  audFields.forEach(k=>{const val=data.audLimits?.[k];$(k).value=editableAud(val);$(k).placeholder=val===null||val===undefined?'Waiting for AUD quote':'AUD amount';});
  $('publishableKey').value=s.publishableKey||'';
  $('collectionOptions').innerHTML=s.collections.map(c=>`<label class="collection-label"><input data-contract="${htmlSafe(c.address)}" type="checkbox" ${c.enabled?'checked':''}><span>${htmlSafe(c.name)}</span></label>`).join('');}
-function renderReadiness(){if(!data)return;renderOpenSeaConnection();const checks=[['Live market connected',(data.stats?.successfulRequests??0)>0],['Dedicated wallet configured',data.hasDedicatedWallet],['Environment live-buy safeguard',data.liveEnvironmentEnabled],['Market data scanned',!!data.lastScan],['Completed sales fetched',data.stats.sales>0]];
+function renderReadiness(){if(!data)return;renderOpenSeaConnection();
+ const deep=data.deepScan??{};
+ $('deepScanStatus').textContent='Last scan: '+(deep.lastMode||'regular')+
+  ' ('+(deep.scanPages||data.settings.pagesPerCollection)+' pages/collection)'+
+  (deep.lastAt?' · Last deep: '+new Date(deep.lastAt).toLocaleString():' · No deep scan completed')+
+  (deep.enabled&&deep.nextAt?' · Next deep: '+new Date(deep.nextAt).toLocaleString():'');
+ $('runDeepScanBtn').disabled=Boolean(data.scanning)||Boolean(data.armed);
+ const checks=[['Live market connected',(data.stats?.successfulRequests??0)>0],['Dedicated wallet configured',data.hasDedicatedWallet],['Environment live-buy safeguard',data.liveEnvironmentEnabled],['Market data scanned',!!data.lastScan],['Completed sales fetched',data.stats.sales>0]];
  $('readiness').innerHTML=checks.map(([label,yes])=>`<p class="${yes?'yes':'no'}">${yes?'✓':'✕'} ${label}</p>`).join('');
  $('armBtn').disabled=data.armed;$('armBtn').textContent=data.armed?'LIVE BUYING ARMED':'Arm live autobuyer';$('armNotice').textContent=data.armed?'REAL MONEY BUYING IS ACTIVE. Use Disarm immediately to stop future orders.':'Live buying never arms on startup. Failed or uncertain trades are not retried automatically.';}
 function collectSettings(){const old=data.settings;return {...old,mode:'live',
   ...Object.fromEntries(fields.map(k=>[k,Number($(k).value)])),
   ...Object.fromEntries(audFields.map(k=>[k,$(k).value.trim()===''?NaN:Number($(k).value)])),
-  fiatCurrency:'AUD',publishableKey:$('publishableKey').value,
+  fiatCurrency:'AUD',publishableKey:$('publishableKey').value,deepScanEnabled:$('deepScanEnabled').checked,
  openSeaApiKey:$('openSeaApiKey').value.trim(),clearOpenSeaKey:$('clearOpenSeaKey').checked,
   collections:old.collections.map(c=>({...c,enabled:document.querySelector(`[data-contract="${c.address}"]`)?.checked??false}))};}
 async function sync(){try{const incoming=await api('/api/state');
@@ -406,6 +426,11 @@ for(const [id,ev] of [['searchInput','input'],['collectionFilter','change'],['si
  $('pageNext').addEventListener('click',()=>{pageIndex++;filterRows();});
 $('exportBtn').addEventListener('click',()=>{window.location.href='/api/export.csv';});
 document.querySelectorAll('.period').forEach(b=>b.addEventListener('click',()=>{days=Number(b.dataset.period);document.querySelectorAll('.period').forEach(x=>x.classList.toggle('active',x===b));if(currentChart)drawChart(currentChart,days);else void loadChart(true);}));
+$('runDeepScanBtn').addEventListener('click',async()=>{
+ if(data?.armed){toast('Disarm live buying before a manual deep scan.',true);return;}
+ try{await api('/api/scan/deep',{});toast('One-time deep scan started. The next refreshed scan will show deeper coverage.');await sync();}
+ catch(err){toast('Could not start deep scan: '+err.message,true);}
+});
 $('settingsForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/settings',collectSettings());$('settingsNotice').textContent='Saved';$('openSeaApiKey').value='';$('clearOpenSeaKey').checked=false;toast('Strategy saved. Market rescan started.');await sync();fillSettings();}catch(err){$('settingsNotice').textContent='';toast(err.message,true);}});
 $('testOpenSeaBtn').addEventListener('click',async()=>{
  if(openSeaTestBusy)return;
