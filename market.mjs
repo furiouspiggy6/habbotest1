@@ -15,8 +15,20 @@ export function createReadClients(publishableKey='',fetcher=globalThis.fetch,api
   const url=new URL(path,apiBase);
   for(const [name,value] of Object.entries(query))if(value!==undefined && value!==null && String(value)!=='')url.searchParams.set(name,String(value));
   let response;
-  try {response=await fetcher(url.toString(),{method:'GET',headers,signal:AbortSignal.timeout(16000)});}
-  catch(err){throw new Error(`Immutable API request failed (${url.pathname}): ${String(err?.message??err).slice(0,160)}. Check internet, DNS or firewall.`);}
+  // Retry one transient HTTP failure only. Respect a short Retry-After, without
+  // turning a large market scan into an unbounded waiting loop.
+  for(let attempt=0;attempt<2;attempt++){
+   try {response=await fetcher(url.toString(),{method:'GET',headers,signal:AbortSignal.timeout(16000)});}
+   catch(err){throw new Error(`Immutable API request failed (${url.pathname}): ${String(err?.message??err).slice(0,160)}. Check internet, DNS or firewall.`);}
+   if(attempt===0&&[429,500,502,503,504].includes(response.status)){
+    const retryAfter=Number(response.headers?.get?.('retry-after'));
+    const delay=Number.isFinite(retryAfter)&&retryAfter>0?Math.min(retryAfter*1000,3000):800;
+    try{await response.body?.cancel?.();}catch{}
+    await sleep(delay);
+    continue;
+   }
+   break;
+  }
   let result;
   const body=await response.text();
   try{result=JSON.parse(body);}catch{
@@ -72,12 +84,20 @@ export async function makeClients(key){
  return {orderbook:new orderbook.Orderbook({baseConfig:cfg}),blockchainData:new blockchainData.BlockchainData({baseConfig:cfg}),pkg};
 }
 export async function collectPage(client,col,status,limit,pageCursor=null){
- let cursor=pageCursor,seen=new Set(),all=[],pages=0,limited=false,received=0;
+ let cursor=pageCursor,seen=new Set(),all=[],pages=0,limited=false,received=0,pageError=null;
  const quoteTypes=new Set(),rejections=new Map();let sampleShape=null;
  for(let i=0;i<limit;i++){
   const request={sellItemContractAddress:col.address,status,pageSize:50};
   if(cursor)request.pageCursor=cursor;
-  const response=await client.listListings(request);
+  let response;
+  try{response=await client.listListings(request);}
+  catch(err){
+   // Keep pages already fetched from Immutable; never turn partial real data
+   // into an empty collection solely because a later page timed out.
+   if(pages===0)throw err;
+   pageError=String(err?.message??err).slice(0,240);
+   break;
+  }
   const {data,next}=unpackPage(response);
   received+=data.length;
   if(data.length&&!sampleShape){const sample=data[0];sampleShape={fields:Object.keys(sample).slice(0,20),status:sample.status?.name??sample.status??null};}
@@ -93,7 +113,7 @@ export async function collectPage(client,col,status,limit,pageCursor=null){
   await sleep(75);
  }
  if(cursor)limited=true;
- return {orders:all,limited,nextCursor:cursor,pages,received,quoteTypes:[...quoteTypes],rejections:Object.fromEntries(rejections),sampleShape};
+ return {orders:all,limited,nextCursor:cursor,pages,received,pageError,quoteTypes:[...quoteTypes],rejections:Object.fromEntries(rejections),sampleShape};
 }
 function metadataFromNFT(response){
  const n=unwrap(response);
@@ -159,8 +179,9 @@ export async function scanMarket(settings,cache,progress={},clients=createReadCl
   try{
    const active=await collectPage(clients.orderbook,col,'ACTIVE',settings.pagesPerCollection);
    addResult(active,col,'ACTIVE');successfulRequests++;
-   diagnostics.push({collection:col.name,status:'ACTIVE',raw:active.received,accepted:active.orders.length,pages:active.pages,filtered:active.rejections,shape:active.sampleShape,hasMore:active.limited});
-   if(active.limited){truncated++;warnings.push(`${col.name} ACTIVE: more listings available after ${active.pages} pages. Increase scan depth if you need broader *current* listing coverage.`);}
+   diagnostics.push({collection:col.name,status:'ACTIVE',raw:active.received,accepted:active.orders.length,pages:active.pages,filtered:active.rejections,shape:active.sampleShape,hasMore:active.limited,error:active.pageError});
+   if(active.pageError){failedRequests++;warnings.push(`${col.name} ACTIVE stopped after ${active.pages} pages; ${active.orders.length} real offers retained. Error: ${active.pageError}`);}
+   if(active.limited){truncated++;warnings.push(`${col.name} ACTIVE: more listings exist beyond the ${active.pages} downloaded pages${active.pageError?' (scan interrupted)':' (page limit reached)'}.`);}
   }catch(e){failedRequests++;const message=String(e?.message??e).slice(0,220);warnings.push(`${col.name} ACTIVE request failed: ${message}`);diagnostics.push({collection:col.name,status:'ACTIVE',error:message});}
   // A fresh first page on every scan captures new fills. Older FILLED pages are
   // indexed incrementally using a persisted cursor, rather than starting over
@@ -182,6 +203,10 @@ export async function scanMarket(settings,cache,progress={},clients=createReadCl
      pagesThisScan+=older.pages;accepted+=older.orders.length;raw+=older.received;
      more=older.limited;
      progress[progressKey]=older.nextCursor||null;
+     if(older.pageError){
+      failedRequests++;
+      warnings.push(`${col.name} FILLED backfill stopped after ${older.pages} pages; sales already fetched were retained. Error: ${older.pageError}`);
+     }
     }catch(e){
      // A stale/invalidated pagination cursor must not block fresh fills forever.
      progress[progressKey]=newest.nextCursor||null;
