@@ -10,17 +10,7 @@ for /f %%V in ('node -p "process.versions.node.split('.')[0]" 2^>nul') do set "N
 if not defined NODE_MAJOR goto NEED_NODE
 if %NODE_MAJOR% LSS 24 goto OLD_NODE
 node -v
-if not exist node_modules\@imtbl\sdk (
-  echo.
-  echo Installing the Immutable SDK for first use...
-  call npm install
-  if errorlevel 1 (
-    echo.
-    echo ERROR: npm install failed. Check your internet connection.
-    pause
-    exit /b 1
-  )
-)
+echo Read-only Habbo NFT scanner ready (no SDK installation needed).
 echo.
 echo Opening dashboard at http://127.0.0.1:38571
 start "" /min powershell -NoProfile -WindowStyle Hidden -Command "Start-Sleep -Seconds 3; Start-Process http://127.0.0.1:38571"
