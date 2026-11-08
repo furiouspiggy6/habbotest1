@@ -1,0 +1,64 @@
+name: Build Windows desktop installer and publish native updates
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'build/**'
+      - 'public/**'
+      - 'core.mjs'
+      - 'market.mjs'
+      - 'server.mjs'
+      - 'trade.mjs'
+      - 'updates.mjs'
+      - 'package.json'
+      - '.github/workflows/desktop-windows.yml'
+  workflow_dispatch:
+permissions:
+  contents: write
+concurrency:
+  group: habbo-desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Install desktop build dependencies
+        run: npm install --no-audit --no-fund
+      - name: Test scanner and updater logic
+        run: npm test
+      - name: Package Windows installer and auto-update manifest
+        run: npm run dist:win
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+      - name: Check installer and latest.yml
+        shell: pwsh
+        run: |
+          $exe = @(Get-ChildItem dist -Filter 'Habbo-NFT-Market-Radar-Setup-*.exe' -File)
+          if ($exe.Count -ne 1 -or $exe[0].Length -lt 10MB) { throw 'Expected Windows installer missing or unexpectedly small' }
+          if (-not (Test-Path 'dist/latest.yml')) { throw 'Missing latest.yml: native auto-updates would not work' }
+          Get-ChildItem dist | Select-Object Name,Length | Format-Table
+      - name: Publish Windows desktop release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          VERSION=$(node -p "require('./package.json').version")
+          TAG="v${VERSION}"
+          shopt -s nullglob
+          assets=(dist/*Setup-*.exe dist/latest.yml dist/*.blockmap)
+          if [ ${#assets[@]} -lt 2 ]; then echo 'Installer and native update metadata required'; exit 1; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; increment package.json version before publishing."
+            exit 1
+          fi
+          gh release create "$TAG" "${assets[@]}" --target "$GITHUB_SHA" \
+            --title "Habbo NFT Market Radar $TAG (Windows desktop)" \
+            --notes "Native Windows desktop installer with Electron auto-updates. Install the .exe once; subsequent updates download inside the app. This build is currently unsigned, so Windows SmartScreen may warn. NFT buying is disabled by default."

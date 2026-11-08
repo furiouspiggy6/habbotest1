@@ -1,7 +1,6 @@
+# Manual legacy ZIP workflow only. Desktop releases use desktop-windows.yml.
 name: Test and publish Windows updates
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
 permissions:
   contents: write

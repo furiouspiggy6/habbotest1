@@ -7,7 +7,7 @@ import {scanMarket} from './market.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
 import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
-const dataDir=path.join(HERE,'data');fs.mkdirSync(dataDir,{recursive:true});
+const dataDir=process.env.HABBO_DESKTOP_APP==='1' && process.env.HABBO_DATA_DIR?path.resolve(process.env.HABBO_DATA_DIR):path.join(HERE,'data');fs.mkdirSync(dataDir,{recursive:true});
 const storePath=path.join(dataDir,'state.json');
 function dotenv(){try{for(const line of fs.readFileSync(path.join(HERE,'.env'),'utf8').split(/\r?\n/)){
  const m=line.match(/^\s*([A-Z_][A-Z_0-9]*)\s*=\s*(.*)\s*$/i);
@@ -155,6 +155,7 @@ async function autoUpdateTick(){
 }
 function scheduleAutoUpdates(){
  if(autoUpdateTimer)clearInterval(autoUpdateTimer);
+ if(process.env.HABBO_DESKTOP_APP==='1'){markUpdate('desktop','Updates are managed by the installed Windows desktop app.');return;}
  if(process.platform!=='win32'){
   markUpdate('unsupported','Automatic installation is available on Windows only.');
   return;
@@ -165,6 +166,21 @@ function scheduleAutoUpdates(){
  // Let first market initialization proceed, then check. Busy scans defer to next tick.
  setTimeout(()=>{void autoUpdateTick();},12000).unref();
 }
+
+// Native Electron updater: stop new scans, finish the current one, never interrupt armed buying.
+export async function pauseForDesktopUpdate(){
+ if(liveArmed||updating)return false;
+ updating=true;
+ const deadline=Date.now()+180000;
+ while(scanning && Date.now()<deadline){
+  if(liveArmed){updating=false;return false;}
+  await new Promise(resolve=>setTimeout(resolve,250));
+ }
+ if(scanning||liveArmed){updating=false;return false;}
+ event('system','Native desktop update ready; installing and restarting.');save();
+ return true;
+}
+export function resumeAfterDesktopUpdate(){updating=false;}
 
 function send(res,status,data,contentType='application/json; charset=utf-8'){
  const buf=typeof data==='string'?data:JSON.stringify(data);
@@ -181,6 +197,7 @@ const server=http.createServer(async(req,res)=>{
   }
   if(req.method==='GET'&&uri.pathname==='/api/state')return send(res,200,safeSummary());
   if(req.method==='GET'&&uri.pathname==='/api/update/check'){
+   if(process.env.HABBO_DESKTOP_APP==='1')return send(res,410,{error:'Use the desktop software update button instead.'});
    try {lastCheckedUpdate=await checkForUpdates();return send(res,200,lastCheckedUpdate);} 
    catch(err){lastCheckedUpdate=null;return send(res,503,{error:String(err.message||err),repo:GITHUB_REPO});}
   }
@@ -208,6 +225,7 @@ const server=http.createServer(async(req,res)=>{
    return send(res,200,{ok:true,updatePrefs:state.updatePrefs,updateStatus});
   }
   if(uri.pathname==='/api/update/install'){
+   if(process.env.HABBO_DESKTOP_APP==='1')return send(res,410,{error:'Desktop updates are managed by the installed application.'});
    if(process.platform!=='win32')return send(res,400,{error:'Update installation is currently Windows-only.'});
    if(liveArmed)return send(res,409,{error:'Disarm real-money autobuying before updating.'});
    if(updating)return send(res,409,{error:'Update already in progress.'});

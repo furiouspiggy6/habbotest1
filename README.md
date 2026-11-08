@@ -1,3 +1,29 @@
+# Habbo NFT Market Radar — Windows desktop edition
+
+**Native desktop app** (v2.0.0). This replaces the previous browser-based packaging. The interface is displayed in a dedicated Windows window using Electron; the read-only Immutable NFT scanner runs locally inside that process. A normal browser or separately installed Node.js is not required.
+
+## Install and update
+
+1. Open [GitHub Releases](https://github.com/furiouspiggy6/habbotest1/releases) and select the most recent release labelled **Windows desktop**.
+2. Install `Habbo-NFT-Market-Radar-Setup-2.0.0.exe`. This first desktop installation is required to move from the old browser-based version; do **not** install the old source ZIP.
+3. Launch **Habbo NFT Market Radar** from the Windows Start menu or desktop shortcut.
+4. Future versions are checked/downloaded automatically using Electron's `electron-updater` and the release's `latest.yml` (built by Windows CI). The updater waits until the current scan finishes and avoids interrupting armed real-money trading.
+
+The desktop window includes **Strategy & Settings → Software updates → Check for updates**. Update errors appear inside the app instead of an inaccessible browser fetch. Your desktop app state is under your Windows user profile's Application Data directory. Your old browser-based installation and its `data/` folder are not overwritten or removed.
+
+**Important:** The initial installer is unsigned until a Windows code-signing certificate is configured. Windows SmartScreen may warn. You should download only from the project's own GitHub Releases page, and never provide wallet private keys to a web page or GitHub. The auto-updater checks SHA-512 file integrity from `latest.yml` but publisher signing is not yet configured. Treat the desktop build as experimental and keep real-money buying disabled.
+
+## Building
+
+- `npm install`
+- `npm test`
+- `npm run start` for development (update checks only run in a packaged executable)
+- `npm run dist:win` to build the Windows NSIS installer; `.github/workflows/desktop-windows.yml` builds/publishes automatically when a new version is pushed to `main`.
+
+The legacy Windows ZIP-based updater remains in the codebase for users of v1.x, but **desktop v2.x does not run it**. The legacy ZIP release workflow is now manual-only so that it cannot preempt the native Windows installer release.
+
+---
+
 # Habbo NFT Market Radar (Windows)
 
 Local dashboard for **Habbo NFT collections on Immutable zkEVM only**. Tracks listings, recorded fills, price-history candles and underpriced offers. Includes automatic **paper** purchases, and a guarded, **experimental** real-money order execution module. It does not support ordinary Habbo furniture/credits, in-game Silver/Emerald sales, or Ethereum-mainnet premium Avatar/Portrait/Room NFTs.

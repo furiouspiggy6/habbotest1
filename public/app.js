@@ -99,8 +99,8 @@ async function sync(){try{const incoming=await api('/api/state');
  data=incoming;
  if($('appVersion'))$('appVersion').textContent='v'+data.appVersion;
  if($('updaterVersion'))$('updaterVersion').textContent='v'+data.appVersion;
- if($('autoInstallUpdates'))$('autoInstallUpdates').checked=data.updatePrefs?.autoInstall??true;
- if(data.updateStatus?.message&&!updateBusy&&!availableUpdate)$('updateDetails').textContent=data.updateStatus.message;
+ if($('autoInstallUpdates')&&!window.marketRadarDesktop)$('autoInstallUpdates').checked=data.updatePrefs?.autoInstall??true;
+ if(!window.marketRadarDesktop&&data.updateStatus?.message&&!updateBusy&&!availableUpdate)$('updateDetails').textContent=data.updateStatus.message;
  if(!selectedId||!data.rows.some(r=>r.id===selectedId))selectedId=data.rows[0]?.id||null;
  renderMarket();if(currentTab==='trades')renderTrades();if(currentTab==='settings')renderReadiness();
  if(!settingsLoaded){fillSettings();settingsLoaded=true;}
@@ -118,6 +118,11 @@ $('armBtn').addEventListener('click',async()=>{try{await api('/api/arm',{phrase:
 $('disarmBtn').addEventListener('click',async()=>{try{await api('/api/disarm',{});toast('Live buying is disarmed');await sync();}catch(e){toast(e.message,true);}});
 
 async function checkForUpdate(){
+ if(window.marketRadarDesktop){
+  $('updateDetails').textContent='Checking GitHub for a native Windows update...';
+  try {await window.marketRadarDesktop.checkForUpdates();}catch(err){$('updateDetails').textContent='Desktop update error: '+err.message;}
+  return;
+ }
  if(updateBusy)return;updateBusy=true;availableUpdate=null;
  $('checkUpdateBtn').disabled=true;$('installUpdateBtn').hidden=true;
  $('updateDetails').textContent='Checking GitHub releases...';
@@ -135,6 +140,10 @@ $('checkUpdateBtn').addEventListener('click',checkForUpdate);
 $('autoInstallUpdates').addEventListener('change',async()=>{
  const enabled=$('autoInstallUpdates').checked;
  try{
+  if(window.marketRadarDesktop){
+   await window.marketRadarDesktop.setAutoUpdates(enabled);
+   toast(enabled?'Desktop auto-updates enabled.':'Desktop auto-updates disabled.');return;
+  }
   const result=await api('/api/update/preferences',{autoInstall:enabled});
   $('updateDetails').textContent=result.updateStatus?.message||'Preference saved.';
   toast(enabled?'Automatic updates enabled. No ZIP downloads needed.':'Automatic updates disabled.');
@@ -160,4 +169,17 @@ $('installUpdateBtn').addEventListener('click',async()=>{
  finally{updateBusy=false;$('installUpdateBtn').disabled=false;$('checkUpdateBtn').disabled=false;}
 });
 
+if(window.marketRadarDesktop){
+ $('installUpdateBtn').hidden=true;
+ window.marketRadarDesktop.onUpdateStatus(info=>{
+  $('updateDetails').textContent=info.message||'Desktop auto-updater ready.';
+  if(info.phase==='downloading'||info.phase==='installing'||info.phase==='waiting')$('checkUpdateBtn').disabled=true;
+  else $('checkUpdateBtn').disabled=false;
+ });
+ try{
+  const preferences=await window.marketRadarDesktop.getAutoUpdates();
+  $('autoInstallUpdates').checked=preferences.enabled;
+  if(preferences.status?.message)$('updateDetails').textContent=preferences.status.message;
+ }catch(err){$('updateDetails').textContent='Desktop update preferences unavailable: '+err.message;}
+}
 await sync();setInterval(sync,4000);

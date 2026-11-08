@@ -17,7 +17,7 @@ test('checksum must match filename and digest',()=>{
  assert.throws(()=>parseChecksum(`${hash}  wrong.zip\n`,names.zip));
 });
 test('release must belong to intended GitHub repository and have both assets',async()=>{
- const version='1.1.0';const names=expectedAssetNames(version);
+ const version='2.1.0';const names=expectedAssetNames(version);
  const item=name=>({name,size:123,browser_download_url:`https://github.com/${GITHUB_REPO}/releases/download/v${version}/${name}`});
  const rel={tag_name:'v'+version,assets:[item(names.zip),item(names.checksum)]};
  const result=await checkForUpdates(async()=>({ok:true,status:200,json:async()=>rel}));
@@ -62,6 +62,7 @@ test('Windows updater must verify the replacement process is online and preserve
  assert.match(recovery,/Verified Market Radar/);
  assert.match(recovery,/node\.exe/);
 });
+
 
 test('manual update requests queue behind the active scan instead of returning HTTP 409',async()=>{
  const {readFileSync}=await import('node:fs');
