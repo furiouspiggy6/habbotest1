@@ -141,7 +141,8 @@ export function effectiveAudSettings(settings,quote,now=Date.now()){
   dailyBudgetEth:Math.min(5,convert('dailyBudgetAud','dailyBudgetEth')),
   minPriceEth:convert('minPriceAud','minPriceEth'),
   minimumTotalPriceEth:Number(settings.minimumFiatPrice)>0?
-   Number(settings.minimumFiatPrice)/(settings.fiatCurrency==='USD'?Number(quote.usd):q.spot):0},
+   Number(settings.minimumFiatPrice)/(settings.fiatCurrency==='USD'?Number(quote.usd):q.spot):0,
+  minimumProfitEth:Number(settings.minEstimatedProfitAud??0)/q.spot},
   available:true,spot:q.spot,required:enabled};
 }
 export function audLimitSummary(settings,quote,now=Date.now()){
