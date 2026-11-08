@@ -30,7 +30,23 @@ let fiatRates=null,fiatRateError='',nextFiatCheckAt=0;
 async function refreshFiatRates(){
  if(Date.now()<nextFiatCheckAt)return;
  nextFiatCheckAt=Date.now()+5*60*1000; // one public price request every five minutes
- try{fiatRates=await fetchFiatRates();fiatRateError='';}
+ try{
+  fiatRates=await fetchFiatRates();fiatRateError='';
+  // Migrate any previously saved USD minimum to an equivalent AUD minimum,
+  // rounding UP to the next cent so an existing protection is not relaxed.
+  if(state.settings.fiatCurrency==='USD'){
+   const converted=Math.ceil(state.settings.minimumFiatPrice*fiatRates.aud/fiatRates.usd*100)/100;
+   if(converted<=100000&&Number.isFinite(converted)){
+    state.settings.minimumFiatPrice=converted;
+    state.settings.fiatCurrency='AUD';
+    liveArmed=false;save();
+    event('system','Existing USD purchase minimum converted to AUD using a fresh FX quote.');
+   }else{
+    liveArmed=false;
+    fiatRateError='Saved USD minimum is too large to migrate safely; review your price floor.';
+   }
+  }
+ }
  catch(error){
   fiatRateError=String(error?.message??error).slice(0,200);
   nextFiatCheckAt=Date.now()+60*1000; // retry failures at most once a minute
