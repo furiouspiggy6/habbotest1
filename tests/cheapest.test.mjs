@@ -34,6 +34,15 @@ test('when display prices tie, prefer the cheaper fee-inclusive purchase',()=>{
  assert.equal(chosen.length,1);
  assert.equal(chosen[0].id,'less-fees');
 });
+test('cheapest visible NFT is chosen by buyer total even when base ask is lower',()=>{
+ const key='0xface|name:camouflage face paint';
+ const group=cheapestPerCollectible([
+  offer('cheap-base-expensive-fees',key,0.00286,{totalWithFeesEth:0.0032}),
+  offer('higher-base-cheaper-to-buy',key,0.0029,{totalWithFeesEth:0.0031})
+ ]);
+ assert.equal(group[0].id,'higher-base-cheaper-to-buy');
+ assert.equal(group[0].groupedOfferCount,2);
+});
 test('different collectible identities and collections never get incorrectly merged',()=>{
  const result=cheapestPerCollectible([
   offer('a','0xface|name:camouflage face paint',0.004),
