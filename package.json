@@ -7,8 +7,9 @@
   "scripts": {
     "start": "electron .",
     "start:legacy": "node server.mjs",
-    "test": "node --check public/app.js && node --test tests/*.test.mjs tests/*.test.cjs",
-    "dist:win": "electron-builder --win nsis --x64 --publish never"
+    "test": "npm run check:ui && node --test tests/*.test.mjs tests/*.test.cjs",
+    "dist:win": "electron-builder --win nsis --x64 --publish never",
+    "check:ui": "node --check public/app.js"
   },
   "engines": {
     "node": ">=24"
