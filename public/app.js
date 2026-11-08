@@ -184,7 +184,10 @@ function renderInspection(info){
  const enough=h.count30d>=3;
  const historyRows=h.sales.map(s=>`<tr><td>${htmlSafe(inspectDate(s.timestamp))}</td><td>${htmlSafe(inspectPrice(s.price))}</td><td>${htmlSafe(s.tokenId)}</td><td>${htmlSafe(String(s.id))}</td></tr>`).join('');
  const totalCost=Number(r.totalWithFeesEth);
- const rate=info.audRate,liveCheck=info.priceAudit;
+ const rate=info.audRate,liveCheck=info.priceAudit,stackFloor=info.stackFloor;
+ const stackedFloor=stackFloor?.status==='available'
+  ?inspectWeth(stackFloor.priceEth)+' (order '+String(stackFloor.orderId||'unknown')+')'
+  :'Not available — '+(stackFloor?.reason||'No separate quote');
  const latestOrder=(liveCheck?.status==='confirmed'
   ?(liveCheck.priceChanged||liveCheck.feesChanged?'Changed — verify before buying':'Matched original Immutable order')
   :'Not independently verified — '+(liveCheck?.message||'API unavailable'));
@@ -213,6 +216,8 @@ function renderInspection(info){
    ${inspectPair('Immutable order recheck',latestOrder)}
    ${liveCheck?.status==='confirmed'?`${inspectPair('Rechecked Immutable asking price',inspectWeth(liveCheck.priceEth))}${inspectPair('Rechecked fee-inclusive total',inspectWeth(liveCheck.totalCostEth))}`:''}
    ${inspectPair('Lowest ask among scanned copies',r.floor===null||r.floor===undefined?'Unavailable':inspectWeth(r.floor))}
+   ${inspectPair('Independent Immutable stack floor',stackedFloor)}
+   ${stackFloor?.status==='available'?`${inspectPair('Stack floor fee-inclusive cost',inspectWeth(stackFloor.totalCostEth))}`:''}
    ${inspectPair('Buyer fees shown by Immutable',inspectPrice(r.feeEstimateEth))}
    ${inspectPair('Total purchase cost incl. buyer fees',inspectPrice(r.totalWithFeesEth))}
    ${inspectPair('Dollar minimum satisfied',r.fiatMinPassed?'Yes':'No — listing excluded')}
@@ -233,7 +238,7 @@ function renderInspection(info){
    <button class="button ghost inspect-copy" type="button" data-copy="${htmlSafe(r.tokenId)}">Copy token ID</button>
    <button class="button ghost inspect-copy" type="button" data-copy="${htmlSafe(r.id)}">Copy order ID</button>
   </div>
-  <div class="inspect-warning">${info.coveragePartial?'The Immutable scan has partial active-listing coverage, so a cheaper marketplace offer may be missing from this feed. ':''}TokenTrove's AUD conversion and marketplace order may differ from this app. Compare the underlying ETH/WETH price and exact order rather than AUD alone. No TokenTrove live price was retrieved automatically. AUD estimates use the current ETH/AUD rate, not the exchange rate on historical sale dates. Immutable settlement is in WETH. Estimates assume resale at the 30-day reference price and subtract the configured ${htmlSafe(inspectPct(estimate.resaleFeePct))} resale fee and the listing's observed buyer fees. They exclude gas, slippage, future price changes, additional marketplace charges, and time-to-sell. A buyer is not guaranteed. Immutable FILLED order update timestamps may differ from actual settlement times. Data and live order availability can change after the last scan. Always confirm the offer on TokenTrove.</div>
+  <div class="inspect-warning">${info.coveragePartial?'The Immutable scan has partial active-listing coverage, so a cheaper marketplace offer may be missing from this feed. ':''}${stackFloor?.status==='available'&&stackFloor.priceEth<r.price-1e-9?'Immutable\'s separately indexed stack floor shows a cheaper WETH-priced offer than the selected cached listing. Compare both order IDs before any purchase. ':''}TokenTrove's AUD conversion and marketplace order may differ from this app. Compare the underlying ETH/WETH price and exact order rather than AUD alone. No TokenTrove live price was retrieved automatically. AUD estimates use the current ETH/AUD rate, not the exchange rate on historical sale dates. Immutable settlement is in WETH. Estimates assume resale at the 30-day reference price and subtract the configured ${htmlSafe(inspectPct(estimate.resaleFeePct))} resale fee and the listing's observed buyer fees. They exclude gas, slippage, future price changes, additional marketplace charges, and time-to-sell. A buyer is not guaranteed. Immutable FILLED order update timestamps may differ from actual settlement times. Data and live order availability can change after the last scan. Always confirm the offer on TokenTrove.</div>
   <div class="inspect-meta">Orderbook source: Immutable zkEVM · Cached scan ${htmlSafe(listingDate(info.lastScan))} · Rechecked ${htmlSafe(listingDate(liveCheck?.checkedAt))}<br>Collection contract: ${htmlSafe(r.contract)}<br>Immutable order ID: ${htmlSafe(r.id)}<br>The TokenTrove link opens a collection search, not a verified deep link to this exact order.</div>`;
  $('inspectContent').querySelectorAll('.inspect-copy').forEach(btn=>btn.addEventListener('click',async()=>{
   try{await navigator.clipboard.writeText(btn.dataset.copy);toast('Copied to clipboard');}
