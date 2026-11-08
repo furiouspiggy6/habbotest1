@@ -1,4 +1,4 @@
-# Launched only after user explicitly confirms an update in the local dashboard.
+# Launched by the verified-release updater (either automatic when enabled or manually confirmed).
 # The server validates the GitHub release asset and SHA-256 before invoking us.
 param(
   [Parameter(Mandatory=$true)][string]$InstallDir,
