@@ -144,7 +144,8 @@ export function effectiveAudSettings(settings,quote,now=Date.now()){
   minPriceEth:convert('minPriceAud','minPriceEth'),
   minimumTotalPriceEth:Number(settings.minimumFiatPrice)>0?
    Number(settings.minimumFiatPrice)/(settings.fiatCurrency==='USD'?Number(quote.usd):q.spot):0,
-  minimumProfitEth:(Number(settings.minEstimatedProfitAud??0)+Number(settings.estimatedExtraCostsAud??0))/q.spot},
+  minimumProfitEth:(Number(settings.minEstimatedProfitAud??0)+Number(settings.estimatedExtraCostsAud??0))/q.spot,
+  estimatedExtraCostsEth:Number(settings.estimatedExtraCostsAud??0)/q.spot},
   available:true,spot:q.spot,required:enabled};
 }
 export function audLimitSummary(settings,quote,now=Date.now()){
@@ -203,8 +204,9 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
  const quantity=Number(row.quantity)||1;
  const totalCost=Number(row.totalWithFeesEth);
  const reference=Number(row.reference)>0?Number(row.reference):null;
+ const resale=Number(row.conservativeResaleEth)>0?Number(row.conservativeResaleEth):null;
  const resaleFeePct=Number(settings.estimatedResaleFeesPct);
- const expectedProceeds=reference===null?null:reference*quantity*(1-resaleFeePct/100);
+ const expectedProceeds=resale===null?null:resale*quantity*(1-resaleFeePct/100);
  const profit=expectedProceeds===null||!Number.isFinite(totalCost)?null:expectedProceeds-totalCost;
  const roi=profit!==null&&totalCost>0?profit/totalCost*100:null;
  return {
@@ -217,6 +219,17 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
    eligible:row.eligible===true,metadataResolved:row.metadataResolved===true,image:row.image||'',
     estimatedFiatCost:row.estimatedFiatCost??null,fiatMinPassed:row.fiatMinPassed!==false,
     estimatedProfitAud:row.estimatedProfitAud??null,
+    historicalProfitAud:row.historicalProfitAud??null,
+    conservativeResaleEth:row.conservativeResaleEth??null,
+    currentCompetitorAskEth:row.currentCompetitorAskEth??null,
+    currentCompetitorCount:row.currentCompetitorCount??0,
+    recentSevenDayMedianEth:row.recentSevenDayMedianEth??null,
+    resaleEstimateBasis:row.resaleEstimateBasis??'Unknown',
+    resaleUndercutPct:row.resaleUndercutPct??2,
+    conservativeDiscountPct:row.conservativeDiscountPct??null,
+    marketEvidencePassed:row.marketEvidencePassed===true,
+    conservativeDiscountPassed:row.conservativeDiscountPassed===true,
+    conservativeNetEdgePassed:row.conservativeNetEdgePassed===true,
     estimatedExtraCostsAud:row.estimatedExtraCostsAud??0,
     opportunityScore:row.opportunityScore??null,scorePassed:row.scorePassed!==false,
     liquidity:row.liquidity??'low',confidence:row.confidence??'low',
@@ -240,7 +253,7 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
 }
 /** Explain why genuine listings are not actionable; first blocking gate per NFT. */
 export function candidateDiagnostics(rows,settings){
- const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,belowFiatMinimum:0,discountTooSmall:0,netEdgeTooSmall:0,belowEstimatedProfit:0,belowOpportunityScore:0,cheaperComparableOffer:0,multiQuantity:0};
+ const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,belowFiatMinimum:0,discountTooSmall:0,netEdgeTooSmall:0,belowEstimatedProfit:0,belowOpportunityScore:0,cheaperComparableOffer:0,noComparableCurrentAsk:0,belowConservativeDiscount:0,multiQuantity:0};
  for(const r of rows){
   if(r.eligible){counts.eligible++;continue;}
   if(!r.metadataResolved){counts.missingMetadata++;continue;}
@@ -249,6 +262,8 @@ export function candidateDiagnostics(rows,settings){
   if(r.price<settings.minPriceEth||r.totalWithFeesEth>settings.maximumPriceEth){counts.priceOutsideLimits++;continue;}
   if(r.fiatMinPassed===false){counts.belowFiatMinimum++;continue;}
   if(!Number.isFinite(r.discount)||r.discount<settings.minDiscountPct){counts.discountTooSmall++;continue;}
+  if(r.marketEvidencePassed===false){counts.noComparableCurrentAsk++;continue;}
+  if(r.conservativeDiscountPassed===false){counts.belowConservativeDiscount++;continue;}
   if(!Number.isFinite(r.netEdge)||r.netEdge<settings.minNetEdgePct){counts.netEdgeTooSmall++;continue;}
   if(r.minProfitPassed===false){counts.belowEstimatedProfit++;continue;}
   if(r.bestOfferPassed===false){counts.cheaperComparableOffer++;continue;}
