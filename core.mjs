@@ -13,7 +13,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   mode:'live', refreshSeconds:90, pagesPerCollection:20,
   minDiscountPct:25, minSales30d:3, minNetEdgePct:12,
   estimatedResaleFeesPct:7.5, maximumPriceEth:0.015,
-  minPriceEth:0.00005, dailyBudgetEth:0.05, maxPurchasesPerDay:5,
+  minPriceEth:0.00005, minimumFiatPrice:5, fiatCurrency:'AUD', dailyBudgetEth:0.05, maxPurchasesPerDay:5,
   collections:COLLECTIONS, publishableKey:''
 });
 export const round=(v,d=8)=>Number(Number(v).toFixed(d));
@@ -100,6 +100,30 @@ export function analyze(listings,filled,settings,now=Date.now()){
    discount:discount===null?null:round(discount,1),netEdge:netEdge===null?null:round(netEdge,1),eligible};
  }).sort((a,b)=>Number(b.eligible)-Number(a.eligible)||(b.discount??-1000)-(a.discount??-1000));
 }
+// Approximate ETH spot exchange rates; WETH can deviate from ETH. In the absence
+// of a fresh verified quote, a positive fiat minimum blocks all buy candidates.
+export function fiatMinimumStatus(settings,quote,now=Date.now()){
+ const currency=settings?.fiatCurrency==='USD'?'USD':'AUD';
+ const minimum=Number(settings?.minimumFiatPrice??0);
+ const spot=Number(quote?.[currency.toLowerCase()]);
+ const fetchedAt=Number(quote?.fetchedAt);
+ const fresh=Number.isFinite(spot)&&spot>0&&Number.isFinite(fetchedAt)&&
+  fetchedAt>0&&now>=fetchedAt&&now-fetchedAt<=15*60*1000;
+ return {currency,minimum,available:fresh,spot:fresh?spot:null,
+  equivalentWeth:minimum>0&&fresh?minimum/spot:null,
+  fetchedAt:fresh?fetchedAt:null,required:minimum>0};
+}
+export function applyFiatMinimum(rows,settings,quote,now=Date.now()){
+ const threshold=fiatMinimumStatus(settings,quote,now);
+ return rows.map(row=>{
+  const total=Number(row.totalWithFeesEth);
+  const estimatedFiatCost=threshold.available&&Number.isFinite(total)?total*threshold.spot:null;
+  const fiatMinPassed=!threshold.required||
+   (estimatedFiatCost!==null&&estimatedFiatCost+1e-8>=threshold.minimum);
+  return {...row,estimatedFiatCost,fiatMinPassed,eligible:row.eligible===true&&fiatMinPassed};
+ });
+}
+
 /** An external marketplace SEARCH, not a claim that a specific order is still active. */
 export function marketplaceSearchUrl(row){
  const category={Furni:'HabboFurni',Clothes:'HabboClothes',Tokens:'HabboTokens'}[row.collection]||'Habbo';
@@ -129,7 +153,8 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
    contract:row.contract,tokenId:String(row.tokenId),quantity,tokenType:row.tokenType,
    price:row.price,feeEstimateEth:row.feeEstimateEth,totalWithFeesEth:row.totalWithFeesEth,
    reference:row.reference,discount:row.discount,netEdge:row.netEdge,sales30d:row.sales30d,
-   eligible:row.eligible===true,metadataResolved:row.metadataResolved===true,image:row.image||''},
+   eligible:row.eligible===true,metadataResolved:row.metadataResolved===true,image:row.image||'',
+    estimatedFiatCost:row.estimatedFiatCost??null,fiatMinPassed:row.fiatMinPassed!==false},
   lastScan,marketplaceUrl:marketplaceSearchUrl(row),
   estimate:{resaleFeePct,expectedProceedsEth:expectedProceeds===null?null:round(expectedProceeds,10),
    estimatedProfitEth:profit===null?null:round(profit,10),estimatedRoiPct:roi===null?null:round(roi,1)},
@@ -142,13 +167,14 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
 }
 /** Explain why genuine listings are not actionable; first blocking gate per NFT. */
 export function candidateDiagnostics(rows,settings){
- const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,discountTooSmall:0,netEdgeTooSmall:0,multiQuantity:0};
+ const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,belowFiatMinimum:0,discountTooSmall:0,netEdgeTooSmall:0,multiQuantity:0};
  for(const r of rows){
   if(r.eligible){counts.eligible++;continue;}
   if(!r.metadataResolved){counts.missingMetadata++;continue;}
   if(!Number.isFinite(r.reference)||r.sales30d<settings.minSales30d){counts.insufficientComparableSales++;continue;}
   if(r.quantity!==1){counts.multiQuantity++;continue;}
   if(r.price<settings.minPriceEth||r.totalWithFeesEth>settings.maximumPriceEth){counts.priceOutsideLimits++;continue;}
+  if(r.fiatMinPassed===false){counts.belowFiatMinimum++;continue;}
   if(!Number.isFinite(r.discount)||r.discount<settings.minDiscountPct){counts.discountTooSmall++;continue;}
   if(!Number.isFinite(r.netEdge)||r.netEdge<settings.minNetEdgePct){counts.netEdgeTooSmall++;continue;}
   // Never silently label a listing actionable if a future safety gate is added.
@@ -164,11 +190,13 @@ export function candles(sales,key,now=Date.now()){
 }
 export function validateSettings(s){
  const n=JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
- for(const [k,min,max] of [['refreshSeconds',30,900],['pagesPerCollection',1,40],['minDiscountPct',0,95],['minSales30d',3,100],['minNetEdgePct',0,1000],['estimatedResaleFeesPct',0,60],['maximumPriceEth',0.00001,2],['dailyBudgetEth',0.0001,5],['minPriceEth',0,0.5],['maxPurchasesPerDay',1,50]]){
+ for(const [k,min,max] of [['refreshSeconds',30,900],['pagesPerCollection',1,40],['minDiscountPct',0,95],['minSales30d',3,100],['minNetEdgePct',0,1000],['estimatedResaleFeesPct',0,60],['maximumPriceEth',0.00001,2],['dailyBudgetEth',0.0001,5],['minPriceEth',0,0.5],['minimumFiatPrice',0,100000],['maxPurchasesPerDay',1,50]]){
   const x=Number(s?.[k]??n[k]);if(!Number.isFinite(x)||x<min||x>max)throw new Error(`${k} must be between ${min} and ${max}`);
   n[k]=['refreshSeconds','pagesPerCollection','minSales30d','maxPurchasesPerDay'].includes(k)?Math.floor(x):x;
  }
  if(n.dailyBudgetEth<n.maximumPriceEth)throw new Error('Daily budget must be >= maximum purchase price');
+ n.fiatCurrency=String(s?.fiatCurrency??n.fiatCurrency).toUpperCase();
+ if(!['AUD','USD'].includes(n.fiatCurrency))throw new Error('fiatCurrency must be AUD or USD');
  n.mode='live'; // Ignore obsolete persisted demo and paper-trading settings.
  n.publishableKey=String(s?.publishableKey??'').trim().slice(0,200);
  n.collections=COLLECTIONS.map(c=>({...c,enabled:(s?.collections??COLLECTIONS).some(x=>x.address===c.address&&x.enabled)}));
