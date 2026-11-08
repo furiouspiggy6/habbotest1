@@ -14,25 +14,27 @@ function view(tab){currentTab=tab;for(const t of ['market','trades','settings'])
  document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
  if(tab==='trades')renderTrades();if(tab==='settings')renderReadiness();}
 function selectedRow(){return data?.rows?.find(r=>r.id===selectedId)??data?.rows?.[0]??null;}
-function renderBanner(){const isLive=data.settings.mode==='live';const hasLiveOrders=Number(data.stats?.rawOrders)>0; $('modeBadge').textContent=isLive?(hasLiveOrders?'● LIVE ORDERS RECEIVED':'● LIVE SCAN NOT VERIFIED'):'● DEMO MARKET';$('updatedText').textContent=relative(data.lastScan);
- const b=$('banner');b.className='banner '+(isLive?'live-banner':'demo-banner');
- let title=isLive?(hasLiveOrders?'Immutable market orders received':'Waiting for real NFT market data'):'Demo trading environment';
- let copy=isLive?'Live NFT listing data. Actual purchases remain OFF unless the live autobuyer is specifically armed.':'Sample prices only — no NFT transactions occur. Switch to Live Data under settings to scan actual listings.';
- if(isLive&&data.warnings.length){
-  b.className='banner error-banner';title=data.stats.failedRequests?'Immutable API connection problems':'Live market scan warnings';
-  copy=data.warnings[0];
- }
- $('bannerGo').textContent=isLive?'View scan details →':'Scan real NFTs →';
+function renderBanner(){
+ const hasListings=Number(data?.rows?.length)>0;
+ const connected=Number(data.stats?.successfulRequests)>0;
+ $('modeBadge').textContent=hasListings?'● LIVE NFT LISTINGS':connected?'● LIVE CONNECTED · NO LISTINGS':'● LIVE NOT CONNECTED';
+ $('updatedText').textContent=relative(data.lastScan);
+ const b=$('banner');b.className='banner '+(connected?'live-banner':'error-banner');
+ let title=hasListings?'Live Habbo NFT listings received':connected?'No matching NFT listings found':'Waiting for Immutable marketplace';
+ let copy=hasListings?'Showing real orderbook listings. Real-money buying remains OFF until separately armed.':connected?'Marketplace reached, but no supported Habbo NFT offers have been found. See scan diagnostics.':'No real orders received. Check the API diagnostics and network connection.';
+ if(data.warnings?.length){b.className='banner error-banner';title=data.stats.failedRequests?'Immutable API connection problems':'Live market scan warnings';copy=data.warnings[0];}
+ $('bannerGo').textContent='View scan details →';
  b.querySelector('b').textContent=title;b.querySelector('span:not(.banner-icon)').textContent=copy;
- $('connectionPill').innerHTML='<span class="pulse-dot"></span> '+(data.scanning?'SCANNING':isLive?(hasLiveOrders?'LIVE ORDERS':'NO LIVE ORDERS'):'DEMO CONNECTED');}
+ $('connectionPill').innerHTML='<span class="pulse-dot"></span> '+(data.scanning?'SCANNING':hasListings?'LIVE LISTINGS':connected?'CONNECTED · EMPTY':'LIVE OFFLINE');
+}
 function renderStats(){const rows=data.rows||[];$('statListings').textContent=rows.length;$('statOpportunities').textContent=rows.filter(x=>x.eligible).length;
- $('statSales').textContent=data.stats?.sales??0;$('statSpend').textContent=fmt(data.paperSpentToday,4);
+ $('statSales').textContent=data.stats?.sales??0;$('statSpend').textContent=fmt(data.liveSpentToday,4);
  $('riskLimit').textContent=fmt(data.settings.maximumPriceEth,4)+' WETH';$('riskDiscount').textContent=data.settings.minDiscountPct+'%';
- const canBuy=data.armed&&data.settings.mode==='live';$('autobuyIndicator').textContent=canBuy?'● LIVE ARMED':data.settings.mode==='demo'?'● PAPER':'● DISARMED';
+ const canBuy=data.armed;$('autobuyIndicator').textContent=canBuy?'● LIVE ARMED':'● DISARMED';
  $('autobuyIndicator').style.color=canBuy?'#f87982':'#55e0bc';
- $('engineText').textContent=data.settings.mode==='demo'?'Paper trading only. Matching demo opportunities are logged automatically if enabled.':canBuy?'REAL MONEY purchasing is active. One eligible NFT at most per scan; it disarms on error or restart.':'Live market scanner is running. Real buying is OFF until separately enabled with a dedicated wallet and confirmation phrase.';
- $('coverageText').textContent=data.settings.mode==='demo'?'Demonstration data · invented NFT examples':`${data.stats.rawOrders??0} raw orders · ${data.stats.pages} pages · ${data.stats.failedRequests??0} failed requests · ${data.stats.truncated?'PARTIAL coverage':'page scan complete'} · ${data.warnings.length} warnings`;
- $('scanDiagnostics').textContent=data.settings.mode==='demo'?'This is demo data. Click Scan real NFTs above to load the Immutable market.':([`Immutable requests: ${data.stats.successfulRequests??0} successful / ${data.stats.failedRequests??0} failed. ${data.stats.rawOrders??0} raw orders received.`,...data.warnings,`Rejected orders: ${JSON.stringify(data.stats.rejected||{})}`, ...((data.stats.diagnostics||[]).map(d=>`${d.collection} ${d.status}: ${d.error||`${d.accepted}/${d.raw} accepted (${d.pages} pages)${d.shape?' shape='+JSON.stringify(d.shape):''}`}`))].join('\n')); 
+ $('engineText').textContent=canBuy?'REAL MONEY purchasing is active. One eligible NFT at most per scan; it disarms on error or restart.':'Live market scanner is running. Real buying is OFF until separately enabled with a dedicated wallet and confirmation phrase.';
+ $('coverageText').textContent=`${data.stats.rawOrders??0} real raw orders · ${data.stats.pages} pages · ${data.stats.failedRequests??0} failed requests · ${data.stats.truncated?'PARTIAL coverage':'page scan complete'} · ${data.warnings.length} warnings`;
+ $('scanDiagnostics').textContent=([`Immutable requests: ${data.stats.successfulRequests??0} successful / ${data.stats.failedRequests??0} failed. ${data.stats.rawOrders??0} raw orders received.`,...data.warnings,`Rejected orders: ${JSON.stringify(data.stats.rejected||{})}`, ...((data.stats.diagnostics||[]).map(d=>`${d.collection} ${d.status}: ${d.error||`${d.accepted}/${d.raw} accepted (${d.pages} pages)${d.shape?' shape='+JSON.stringify(d.shape):''}`}`))].join('\n')); 
 }
 function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),collection=$('collectionFilter').value,signal=$('signalFilter').value;
  const found=(data?.rows??[]).filter(x=>(!text||(`${x.name} ${x.tokenId} ${x.collection}`).toLowerCase().includes(text))&&(!collection||x.collection===collection)&&(signal!=='eligible'||x.eligible));
@@ -73,21 +75,21 @@ async function loadChart(force=false){const r=selectedRow();if(!r){drawChart([],
  if(!force&&selectedKey===r.key&&Date.now()-lastChartRequest<20000){if(currentChart)drawChart(currentChart,days);return;}
  selectedKey=r.key;lastChartRequest=Date.now();try{const result=await api('/api/candles?key='+encodeURIComponent(r.key));if(selectedKey!==result.key)return;currentChart=result.candles;drawChart(currentChart,days);}catch(e){$('chartHint').textContent=e.message;}}
 function renderTrades(){if(!data)return;
- $('paperCount').textContent=data.paperTrades.length;$('paperSpent').textContent=fmt(data.paperTrades.reduce((a,t)=>a+(t.costEth||0),0),4)+' WETH';
+ $('liveSpent').textContent=fmt(data.liveSpentToday,4)+' WETH';
  $('liveCount').textContent=data.liveTrades.filter(t=>t.status==='completed').length;
- const all=[...data.liveTrades,...data.paperTrades].sort((a,b)=>b.timestamp-a.timestamp).slice(0,100);
- $('tradeLog').innerHTML=all.length?all.map(t=>`<div class="log-line"><div><div class="log-main">${htmlSafe(t.name)} <small style="color:#869ab0">· ${t.mode==='paper'?'SIMULATED':'LIVE'}</small></div><div class="log-sub">${new Date(t.timestamp).toLocaleString()} · ${fmt(t.costEth,6)} WETH ${t.error?'· '+htmlSafe(t.error):''} ${t.hash?'· '+htmlSafe(t.hash):''}</div></div><b class="log-status ${t.status==='failed'?'error':''}">${htmlSafe(t.status.toUpperCase())}</b></div>`).join(''):'<div class="empty">No trades recorded yet.</div>';
+ const all=[...data.liveTrades].sort((a,b)=>b.timestamp-a.timestamp).slice(0,100);
+ $('tradeLog').innerHTML=all.length?all.map(t=>`<div class="log-line"><div><div class="log-main">${htmlSafe(t.name)} <small style="color:#869ab0">· LIVE</small></div><div class="log-sub">${new Date(t.timestamp).toLocaleString()} · ${fmt(t.costEth,6)} WETH ${t.error?'· '+htmlSafe(t.error):''} ${t.hash?'· '+htmlSafe(t.hash):''}</div></div><b class="log-status ${t.status==='failed'?'error':''}">${htmlSafe(t.status.toUpperCase())}</b></div>`).join(''):'<div class="empty">No trades recorded yet.</div>';
  $('eventLog').innerHTML=data.events.length?data.events.slice(0,30).map(e=>`<div class="log-line"><div><div class="log-main">${htmlSafe(e.message)}</div><div class="log-sub">${new Date(e.time).toLocaleString()}</div></div><b class="log-status ${e.kind==='error'?'error':''}">${htmlSafe(e.kind.toUpperCase())}</b></div>`).join(''):'<div class="empty">No events recorded.</div>';
 }
 const fields=['minDiscountPct','minSales30d','minNetEdgePct','estimatedResaleFeesPct','maximumPriceEth','dailyBudgetEth','minPriceEth','maxPurchasesPerDay','refreshSeconds','pagesPerCollection'];
-function fillSettings(){const s=data.settings;document.querySelector(`input[name="mode"][value="${s.mode}"]`).checked=true;
- fields.forEach(k=>$(k).value=s[k]);$('paperAutoBuy').checked=s.paperAutoBuy;$('publishableKey').value=s.publishableKey||'';
+function fillSettings(){const s=data.settings;
+ fields.forEach(k=>$(k).value=s[k]);$('publishableKey').value=s.publishableKey||'';
  $('collectionOptions').innerHTML=s.collections.map(c=>`<label class="collection-label"><input data-contract="${htmlSafe(c.address)}" type="checkbox" ${c.enabled?'checked':''}><span>${htmlSafe(c.name)}</span></label>`).join('');}
-function renderReadiness(){if(!data)return;const checks=[['Live market selected',data.settings.mode==='live'],['Dedicated wallet configured',data.hasDedicatedWallet],['Environment live-buy safeguard',data.liveEnvironmentEnabled],['Market data scanned',!!data.lastScan&&data.settings.mode==='live'],['Completed sales fetched',data.stats.sales>0&&data.settings.mode==='live']];
+function renderReadiness(){if(!data)return;const checks=[['Live market connected',(data.stats?.successfulRequests??0)>0],['Dedicated wallet configured',data.hasDedicatedWallet],['Environment live-buy safeguard',data.liveEnvironmentEnabled],['Market data scanned',!!data.lastScan],['Completed sales fetched',data.stats.sales>0]];
  $('readiness').innerHTML=checks.map(([label,yes])=>`<p class="${yes?'yes':'no'}">${yes?'✓':'✕'} ${label}</p>`).join('');
  $('armBtn').disabled=data.armed;$('armBtn').textContent=data.armed?'LIVE BUYING ARMED':'Arm live autobuyer';$('armNotice').textContent=data.armed?'REAL MONEY BUYING IS ACTIVE. Use Disarm immediately to stop future orders.':'Live buying never arms on startup. Failed or uncertain trades are not retried automatically.';}
-function collectSettings(){const old=data.settings;return {...old,mode:document.querySelector('input[name="mode"]:checked').value,
-  ...Object.fromEntries(fields.map(k=>[k,Number($(k).value)])),paperAutoBuy:$('paperAutoBuy').checked,publishableKey:$('publishableKey').value,
+function collectSettings(){const old=data.settings;return {...old,mode:'live',
+  ...Object.fromEntries(fields.map(k=>[k,Number($(k).value)])),publishableKey:$('publishableKey').value,
   collections:old.collections.map(c=>({...c,enabled:document.querySelector(`[data-contract="${c.address}"]`)?.checked??false}))};}
 async function sync(){try{const incoming=await api('/api/state');data=incoming;
  if($('appVersion'))$('appVersion').textContent='v'+data.appVersion;
@@ -100,7 +102,7 @@ async function sync(){try{const incoming=await api('/api/state');data=incoming;
  if(currentTab==='market')void loadChart();
  }catch(e){$('connectionPill').textContent='OFFLINE';if(!data)toast('Cannot contact the local server: '+e.message,true);}}
 document.querySelectorAll('.nav').forEach(b=>b.addEventListener('click',()=>view(b.dataset.tab)));
-$('bannerGo').addEventListener('click',async()=>{if(data?.settings.mode==='demo'){try{await api('/api/settings',{...data.settings,mode:'live'});settingsLoaded=false;toast('Live Immutable NFT scan started. Real buying stays OFF.');await sync();}catch(err){toast(err.message,true);}}else{view('trades');}});
+$('bannerGo').addEventListener('click',()=>view('trades'));
 $('engineButton').addEventListener('click',()=>view('settings'));
 $('refreshBtn').addEventListener('click',async()=>{try{await api('/api/refresh',{});toast('Market refresh started');}catch(e){toast(e.message,true);}});
 $('searchInput').addEventListener('input',filterRows);$('collectionFilter').addEventListener('change',filterRows);$('signalFilter').addEventListener('change',filterRows);
@@ -109,7 +111,6 @@ document.querySelectorAll('.period').forEach(b=>b.addEventListener('click',()=>{
 $('settingsForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/settings',collectSettings());$('settingsNotice').textContent='Saved';toast('Strategy saved. Market rescan started.');await sync();}catch(err){$('settingsNotice').textContent='';toast(err.message,true);}});
 $('armBtn').addEventListener('click',async()=>{try{await api('/api/arm',{phrase:$('armPhrase').value});$('armPhrase').value='';toast('Real-money buying armed');await sync();}catch(e){toast(e.message,true);}});
 $('disarmBtn').addEventListener('click',async()=>{try{await api('/api/disarm',{});toast('Live buying is disarmed');await sync();}catch(e){toast(e.message,true);}});
-$('resetPaper').addEventListener('click',async()=>{if(!confirm('Delete all local paper trades?'))return;try{await api('/api/reset-paper',{phrase:'RESET PAPER'});toast('Paper trade history cleared');await sync();}catch(e){toast(e.message,true);}});
 
 async function checkForUpdate(){
  if(updateBusy)return;updateBusy=true;availableUpdate=null;
