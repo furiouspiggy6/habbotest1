@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {analyze,candles,DEFAULT_SETTINGS,validateSettings,demoOrders} from './core.mjs';
+import {analyze,candles,DEFAULT_SETTINGS,validateSettings} from './core.mjs';
 import {scanMarket} from './market.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
 import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
@@ -16,12 +16,9 @@ function dotenv(){try{for(const line of fs.readFileSync(path.join(HERE,'.env'),'
 dotenv();
 function readState(){try{const old=JSON.parse(fs.readFileSync(storePath,'utf8'));
  const nextSettings=validateSettings(old.settings);
- // v1.0.3 started every user in an 8-item demo. One-time migration enables the
- // requested real-data scanner; future explicit demo choices are respected.
- if(!old.schemaVersion && nextSettings.mode==='demo')nextSettings.mode='live';
- return {settings:nextSettings,updatePrefs:{autoInstall:old.updatePrefs?.autoInstall!==false},metadata:old.metadata??{},historicalSales:(old.historicalSales??[]).filter(x=>!String(x?.id??'').startsWith('demo-')),
- paperTrades:old.paperTrades??[],liveTrades:old.liveTrades??[],events:old.events??[]};
- }catch{return {settings:validateSettings(DEFAULT_SETTINGS),updatePrefs:{autoInstall:true},metadata:{},historicalSales:[],paperTrades:[],liveTrades:[],events:[]};}}
+ return {settings:nextSettings,updatePrefs:{autoInstall:old.updatePrefs?.autoInstall!==false},metadata:old.metadata??{},historicalSales:(old.historicalSales??[]).filter(x=>!String(x?.id??'').startsWith('demo-') && !String(x?.name??'').includes(' · sample')),
+ liveTrades:old.liveTrades??[],events:old.events??[]};
+ }catch{return {settings:validateSettings(DEFAULT_SETTINGS),updatePrefs:{autoInstall:true},metadata:{},historicalSales:[],liveTrades:[],events:[]};}}
 const state=readState();
 let lastCheckedUpdate=null;
 let updating=false;
@@ -29,7 +26,7 @@ let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
 let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
 let liveArmed=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
 let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[]};
-function save(){const output={schemaVersion:6,settings:state.settings,updatePrefs:state.updatePrefs,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),paperTrades:state.paperTrades.slice(-1000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
+function save(){const output={schemaVersion:7,settings:state.settings,updatePrefs:state.updatePrefs,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
  const tmp=storePath+'.tmp';fs.writeFileSync(tmp,JSON.stringify(output,null,2));fs.renameSync(tmp,storePath);}
 function event(kind,message){state.events.unshift({kind,message,time:Date.now()});state.events=state.events.slice(0,400);console.log(`[${kind}] ${message}`);}
 function today(t){return new Date(t).toISOString().slice(0,10);}
@@ -41,8 +38,8 @@ function safeSummary(){return {
  hasDedicatedWallet:/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''),
  liveEnvironmentEnabled:process.env.HABBO_ENABLE_LIVE_BUYS==='YES',warnings,stats,
  rows:displayRows.slice(0,800),events:state.events.slice(0,60),
- paperTrades:state.paperTrades.slice(-100).reverse(),liveTrades:state.liveTrades.slice(-100).reverse(),
- paperSpentToday:usedBudget(state.paperTrades),liveSpentToday:usedBudget(state.liveTrades)
+ liveTrades:state.liveTrades.slice(-100).reverse(),
+ liveSpentToday:usedBudget(state.liveTrades)
  };}
 function eligibleForBudget(r,trades){return r.eligible &&
   !trades.some(t=>t.orderId===r.id)&&
@@ -50,14 +47,7 @@ function eligibleForBudget(r,trades){return r.eligible &&
   dayCount(trades)<state.settings.maxPurchasesPerDay;}
 async function doAutoTrades(){
  if(!displayRows.length)return;
- if(state.settings.mode==='demo'&&state.settings.paperAutoBuy){
-  for(const r of displayRows.filter(x=>eligibleForBudget(x,state.paperTrades))){
-   const t={timestamp:Date.now(),orderId:r.id,name:r.name,collection:r.collection,costEth:r.totalWithFeesEth,
-    fairValueEth:r.reference,discount:r.discount,status:'completed',mode:'paper'};
-   state.paperTrades.push(t);event('paper',`SIMULATED buy ${r.name} for ${r.totalWithFeesEth} WETH`);
-  }
- }
- if(state.settings.mode==='live'&&liveArmed){
+ if(liveArmed){
   if(process.env.HABBO_ENABLE_LIVE_BUYS!=='YES'||!/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||'')){
    liveArmed=false;event('error','Live buying disarmed: dedicated wallet configuration missing.');return;
   }
@@ -79,29 +69,22 @@ async function doAutoTrades(){
 }
 async function scan(){if(scanning||updating)return;scanning=true;
  try {
-  let listings,filled;
-  if(state.settings.mode==='demo'){
-   ({listings,filled}=demoOrders());warnings=['DEMO: all prices, sales and NFT names are invented examples. No real funds will move.'];stats={pages:0,metadata:8,sales:filled.length,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[]};
-  }else{
-   const r=await scanMarket(state.settings,state.metadata);({listings,filled}=r);
-   warnings=r.warnings;stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics};
-   if(r.truncated)warnings.unshift('PARTIAL COVERAGE: not every listing or past sale was downloaded; signals are based on a limited sample.');
-  }
-  const isDemo=state.settings.mode==='demo';
-  if(!isDemo){
-   const seen=new Set(state.historicalSales.map(s=>s.id));
-   for(const s of filled)if(!seen.has(s.id)){state.historicalSales.push(s);seen.add(s.id);}
-  }
+  const r=await scanMarket(state.settings,state.metadata);
+  const {listings,filled}=r;
+  warnings=r.warnings;
+  stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics};
+  if(r.truncated)warnings.unshift('PARTIAL COVERAGE: not every listing or past sale was downloaded; signals are based on a limited sample of REAL trades.');
+  const seen=new Set(state.historicalSales.map(s=>s.id));
+  for(const sale of filled)if(!seen.has(sale.id)){state.historicalSales.push(sale);seen.add(sale.id);}
   const threshold=Date.now()-93*86400000;
   state.historicalSales=state.historicalSales.filter(x=>x.timestamp>=threshold).slice(-16000);
-  // Never persist invented demo fills or use them in a real-world signal.
-  chartSales=isDemo?filled:state.historicalSales;
+  chartSales=state.historicalSales;
   activeListings=listings;
   displayRows=analyze(listings,chartSales,state.settings);
   scannedAt=Date.now();
-  if(state.settings.mode==='live'&&stats.sales===0)warnings.push('No completed sale records in this response; trades require credible local sales history.');
-  await doAutoTrades();save();event('scan',`${state.settings.mode.toUpperCase()}: ${listings.length} offers, ${filled.length} filled orders fetched, ${displayRows.filter(x=>x.eligible).length} candidates.`);
- }catch(e){warnings=[`Scan error: ${String(e?.message??e)}`];event('error',warnings[0]);}
+  if(stats.sales===0)warnings.push('No completed sale records in this response; trades require credible local sales history.');
+  await doAutoTrades();save();event('scan',`LIVE: ${listings.length} real listings, ${filled.length} completed orders, ${displayRows.filter(x=>x.eligible).length} candidates.`);
+ }catch(e){liveArmed=false;displayRows=[];activeListings=[];scannedAt=0;stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:1,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[]};warnings=[`Live scan failed: ${String(e?.message??e)}`];event('error',warnings[0]);}
  finally{scanning=false;}
 }
 function schedule(){if(serverTimer)clearInterval(serverTimer);serverTimer=setInterval(()=>{scan().catch(e=>event('error',String(e)));},state.settings.refreshSeconds*1000);}
@@ -197,7 +180,7 @@ const server=http.createServer(async(req,res)=>{
   }
   if(req.method==='GET'&&uri.pathname==='/api/candles'){
    const key=uri.searchParams.get('key');if(!key||key.length>250)return send(res,400,{error:'Invalid key'});
-   const chartHistory=state.settings.mode==='demo'?chartSales:state.historicalSales;
+   const chartHistory=state.historicalSales;
    return send(res,200,{key,candles:candles(chartHistory,key),sales:chartHistory.filter(x=>x.key===key).slice(-180).map(({price,timestamp,id})=>({price,timestamp,id}))});
   }
   if(req.method==='GET'&&uri.pathname==='/api/export.csv'){
@@ -206,7 +189,7 @@ const server=http.createServer(async(req,res)=>{
    const csv=header+displayRows.map(r=>[r.collection,r.name,r.tokenId,r.price,r.reference,r.discount,r.netEdge,r.sales30d,r.eligible,r.id].map(quote).join(',')).join('\n');
    return send(res,200,csv,'text/csv; charset=utf-8');
   }
-  if(req.method!=='POST'||!['/api/settings','/api/refresh','/api/arm','/api/disarm','/api/reset-paper','/api/update/install','/api/update/preferences'].includes(uri.pathname))return send(res,404,{error:'Not found'});
+  if(req.method!=='POST'||!['/api/settings','/api/refresh','/api/arm','/api/disarm','/api/update/install','/api/update/preferences'].includes(uri.pathname))return send(res,404,{error:'Not found'});
   // Local-only API; prevent another browser tab/site from posting by cross-site fetch/forms.
   const origin=req.headers.origin;if(origin&&origin!==`http://127.0.0.1:${PORT}`&&origin!==`http://localhost:${PORT}`)return send(res,403,{error:'Invalid origin'});
   if(req.headers['content-type']?.split(';')[0]!=='application/json')return send(res,415,{error:'Use application/json'});
@@ -238,20 +221,15 @@ const server=http.createServer(async(req,res)=>{
   }
   if(uri.pathname==='/api/settings'){
    if(updating)return send(res,409,{error:'Update installation is in progress.'});
-   const updated=validateSettings(body);const changed=updated.mode!==state.settings.mode;
-   if(changed){liveArmed=false;displayRows=[];activeListings=[];chartSales=[];scannedAt=0;warnings=[];}
-   state.settings=updated;save();schedule();event('system',`Settings saved — ${updated.mode.toUpperCase()} mode`);
+   const updated=validateSettings(body);
+   state.settings=updated;save();schedule();event('system','Live market settings saved');
    void scan();return send(res,200,{ok:true});
   }
   if(uri.pathname==='/api/refresh'){void scan();return send(res,200,{ok:true});}
   if(uri.pathname==='/api/disarm'){liveArmed=false;event('system','Live autobuyer disarmed');return send(res,200,{ok:true});}
-  if(uri.pathname==='/api/reset-paper'){
-   if(body.phrase!=='RESET PAPER')return send(res,400,{error:'Wrong confirmation phrase'});
-   state.paperTrades=[];save();event('system','Paper trading log cleared');return send(res,200,{ok:true});
-  }
   if(uri.pathname==='/api/arm'){
    if(updating)return send(res,409,{error:'Cannot arm live buying during update installation.'});
-   if(state.settings.mode!=='live'||body.phrase!=='ENABLE LIVE NFT BUYING')return send(res,400,{error:'Switch to LIVE mode and type the exact confirmation phrase.'});
+   if(body.phrase!=='ENABLE LIVE NFT BUYING')return send(res,400,{error:'Type the exact confirmation phrase.'});
    if(process.env.HABBO_ENABLE_LIVE_BUYS!=='YES')return send(res,400,{error:'Live buying disabled by .env safeguard.'});
    if(!/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''))return send(res,400,{error:'No valid dedicated wallet private key configured.'});
    if(!scannedAt||Date.now()-scannedAt>state.settings.refreshSeconds*3000||!stats.sales)return send(res,400,{error:'Refresh live market data first; verified sales history is required.'});
