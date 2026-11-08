@@ -15,6 +15,7 @@ test('AUD strategy settings convert WETH safety limits using a fresh ETH/AUD quo
  assert.equal(r.settings.maximumPriceEth,0.02);
  assert.equal(r.settings.dailyBudgetEth,0.08);
  assert.equal(r.settings.minPriceEth,0.0004);
+ assert.equal(r.settings.minimumTotalPriceEth,0.001);
  assert.equal(audLimitSummary(settings,quote,now).dailyBudgetAud,400);
  assert.equal(settings.maximumPriceAud,100);
 });
@@ -64,5 +65,8 @@ test('dashboard uses only AUD money inputs and preserves single initialization',
  assert.match(js,/audLimit\(data\.liveSpentTodayAud\)/);
  assert.match(server,/price_aud,median_aud,total_cost_aud/);
  assert.doesNotMatch(server,/price_weth,median_weth/);
+ const trade=readFileSync(resolve(root,'trade.mjs'),'utf8');
+ assert.match(trade,/fresh\.totalWithFeesEth<settings\.minimumTotalPriceEth/);
+ assert.match(trade,/checked\.totalWithFeesEth<settings\.minimumTotalPriceEth/);
  assert.equal(js.split('async function sync()').length-1,1);
 });
