@@ -85,3 +85,11 @@ GitHub repository: **`furiouspiggy6/habbotest1`**, preferably public to allow un
 After uploading this project into the repository's **main** branch, GitHub Actions (`.github/workflows/publish-release.yml`) runs the tests and creates a release with a version-named ZIP plus checksum. **Each subsequent published update must increase `package.json`'s version**; pushes with the same version skip publishing. GitHub Actions needs permission to write repository contents and workflows must be enabled. If the repository is private, unauthenticated update checks cannot work and require a different authenticated design.
 
 The updater is Windows-specific. `npm install` runs during the update using your installed Node.js 24+ runtime. Since live trades and updater execution could not be tested on a real Windows wallet in this environment, keep live autobuying off until independently reviewed.
+
+## Live scanner diagnostics (v1.0.5)
+
+- **Live vs demo:** in live mode the UI does not claim that market data was retrieved until it actually sees raw orders. There is no automatic fallback to invented sample listings.
+- The scan diagnostics panel displays per-collection raw/accepted counts, API failures, rejected order reasons and the first API response field names (without disclosing private credentials).
+- Fixed Unix-second timestamps arriving as strings and pagination nested in SDK result envelopes. These previously could drop completed sales or limit scans to one page.
+- A publishable key from Immutable Hub may be required for live API access; without one API errors will be shown instead of fake prices.
+- Real-money trading is still experimental and OFF until deliberately enabled. Do not put private keys into GitHub.
