@@ -501,6 +501,13 @@ const server=http.createServer(async(req,res)=>{
    if(body.phrase!=='ENABLE LIVE NFT BUYING')return send(res,400,{error:'Type the exact confirmation phrase.'});
    if(process.env.HABBO_ENABLE_LIVE_BUYS!=='YES')return send(res,400,{error:'Live buying disabled by .env safeguard.'});
    if(!/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''))return send(res,400,{error:'No valid dedicated wallet private key configured.'});
+   // Fail before arming if packaged trading dependencies cannot be loaded.
+   // Missing SDK was previously discovered only after a real purchase attempt.
+   try{
+    const [sdk,ethers]=await Promise.all([import('@imtbl/sdk'),import('ethers')]);
+    if(typeof sdk.orderbook?.Orderbook!=='function'||typeof ethers.Wallet!=='function')
+     return send(res,503,{error:'The installed SDK does not expose required trading interfaces. Buying is disabled.'});
+   }catch{return send(res,503,{error:'Trading dependencies unavailable in this installation. Buying remains disarmed.'});}
    if(!scannedAt||Date.now()-scannedAt>state.settings.refreshSeconds*3000||!stats.sales)return send(res,400,{error:'Refresh live market data first; verified sales history is required.'});
    if(!effectiveAudSettings(state.settings,fiatRates).available)return send(res,409,{error:'Cannot arm live buying: a fresh AUD conversion quote is required for the AUD buying limits.'});
    liveArmed=true;event('system','LIVE auto-buy ARMED until you disarm, restart or an order fails');return send(res,200,{ok:true});
