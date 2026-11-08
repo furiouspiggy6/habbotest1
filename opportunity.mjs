@@ -52,6 +52,8 @@ export function scoreOpportunityRows(rows,history,{now=Date.now(),partialCollect
    const competition=clamp(12-cheaperOffers*4-nearPriceOffers,0,12);
    const momentum=trendPct===null?4:clamp(4+trendPct/10,0,8);
    opportunityScore=Math.round(clamp(25*margin+15*netEdge+25*activity+15*recency+competition+momentum,0,100));
+   if(profitAud<=0)opportunityScore=Math.min(25,opportunityScore);
+   else if(r.marketEvidencePassed===false)opportunityScore=Math.min(49,opportunityScore);
   }
   const liquidity=sales.length>=10&&lastSaleAgeDays!==null&&lastSaleAgeDays<=7?'high':
     sales.length>=5&&lastSaleAgeDays!==null&&lastSaleAgeDays<=14?'medium':'low';
@@ -62,6 +64,10 @@ export function scoreOpportunityRows(rows,history,{now=Date.now(),partialCollect
   if(sales.length<5)cautions.push('Limited verified 30-day sales evidence.');
   if(sales7.length===0)cautions.push('No verified sale of this collectible during the last 7 days.');
   if(cheaperOffers)cautions.push(cheaperOffers+' cheaper competing offer(s) were observed.');
+  if(r.marketEvidencePassed===false)cautions.push('No separate comparable live asking price was observed; historical resale price cannot qualify for autobuy.');
+  if(r.conservativeResaleEth!==undefined&&r.conservativeResaleEth!==null&&r.conservativeResaleEth<Number(r.reference)-1e-10)
+   cautions.push('Current asking prices or recent sales cap the realistic resale estimate below the older 30-day median.');
+  if(profitAud!==null&&profitAud<=0)cautions.push('Projected resale after fees and costs is break-even or a loss.');
   if(trendPct!==null&&trendPct<=-10)cautions.push('Recent 7-day median is at least 10% below the 30-day median.');
   return {...r,opportunityScore,liquidity,confidence,observedActiveOffers:offers.length,
    observedCheaperOffers:cheaperOffers,observedNearPriceOffers:nearPriceOffers,
