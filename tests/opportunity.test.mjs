@@ -91,7 +91,7 @@ test('deep scans are optional, bounded and expose status in the desktop dashboar
  for(const id of ['minOpportunityScore','estimatedExtraCostsAud','deepScanEnabled','deepScanPages','deepScanIntervalMinutes','runDeepScanBtn']){
   assert.match(html,new RegExp('id="'+id+'"'));
  }
- assert.match(server,/scoreOpportunityRows\(repriced,chartSales/);
+ assert.match(server,/scoreOpportunityRows\(withBids,chartSales/);
  assert.match(server,/sortByOpportunity\(scored/);
  assert.match(server,/uri\.pathname==='\/api\/scan\/deep'/);
  assert.match(server,/eligible:row\.eligible&&risk\.available&&scorePassed&&bestOfferPassed/);
