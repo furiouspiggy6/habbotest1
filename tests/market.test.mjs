@@ -126,3 +126,58 @@ test('historical sale backfill advances across refreshes without replaying only 
  assert.equal(third.historyPending,1);
  assert.equal(progress[`${contract}:FILLED`],'4');
 });
+
+
+test('one transient Immutable HTTP 429 is retried, but auth failures are not',async()=>{
+ let calls=0;
+ const cli=createReadClients('',async()=>{
+  calls++;
+  return calls===1?new Response(JSON.stringify({message:'Rate limited'}),{status:429}):new Response(JSON.stringify({result:[],page:{}}),{status:200});
+ });
+ const result=await cli.orderbook.listListings({sellItemContractAddress:col.address,status:'ACTIVE',pageSize:50});
+ assert.deepEqual(result.result,[]);
+ assert.equal(calls,2);
+ let authCalls=0;
+ const forbidden=createReadClients('',async()=>{authCalls++;return new Response(JSON.stringify({message:'Invalid key'}),{status:401});});
+ await assert.rejects(()=>forbidden.orderbook.listListings({sellItemContractAddress:col.address,status:'ACTIVE',pageSize:50}),/HTTP 401/);
+ assert.equal(authCalls,1);
+});
+
+test('failed later page retains already fetched real orders and continuation cursor',async()=>{
+ let calls=0;
+ const client={listListings:async()=>{
+  if(++calls===1)return {result:[order('first-page')],page:{next_cursor:'page-two'}};
+  throw Error('Immutable HTTP 503: temporary outage');
+ }};
+ const out=await collectPage(client,col,'ACTIVE',10);
+ assert.equal(out.orders.length,1);
+ assert.equal(out.orders[0].id,'first-page');
+ assert.equal(out.pages,1);
+ assert.equal(out.limited,true);
+ assert.equal(out.nextCursor,'page-two');
+ assert.match(out.pageError,/HTTP 503/);
+ await assert.rejects(()=>collectPage({listListings:async()=>{throw Error('HTTP 503');}},col,'ACTIVE',10),/HTTP 503/);
+});
+
+test('scan warns about interrupted ACTIVE data without discarding valid pages',async()=>{
+ const {scanMarket}=await import('../market.mjs');
+ const {DEFAULT_SETTINGS}=await import('../core.mjs');
+ const settings={...DEFAULT_SETTINGS,pagesPerCollection:4,collections:DEFAULT_SETTINGS.collections.map(c=>({...c,enabled:c.address===col.address}))};
+ const cache={[`${col.address}|12`]:{name:'Real NFT'}};
+ const progress={};
+ const calls=[];
+ const clients={orderbook:{listListings:async request=>{
+  calls.push(request);
+  if(request.status==='ACTIVE'){
+   if(!request.pageCursor)return {result:[order('real-1')],page:{next_cursor:'second-page'}};
+   throw Error('Immutable HTTP 503: unavailable');
+  }
+  return {result:[],page:{}};
+ }},blockchainData:{getNFT:async()=>{throw Error('no metadata request expected');}}};
+ const out=await scanMarket(settings,cache,progress,clients);
+ assert.deepEqual(out.listings.map(x=>x.id),['real-1']);
+ assert.equal(out.failedRequests,1);
+ assert.equal(out.truncated,1);
+ assert.match(out.warnings.join('\n'),/Furni ACTIVE stopped after 1 pages/);
+ assert.match(out.diagnostics.find(d=>d.status==='ACTIVE').error,/HTTP 503/);
+});
