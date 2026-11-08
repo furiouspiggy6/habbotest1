@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {WETH,COLLECTIONS,normalizeOrder,weiToEth,analyze,DEFAULT_SETTINGS,candles,hydrateNames,validateSettings,safeTime,orderRejectionReason} from '../core.mjs';
+import {WETH,COLLECTIONS,normalizeOrder,weiToEth,analyze,DEFAULT_SETTINGS,candles,hydrateNames,validateSettings,safeTime,orderRejectionReason,candidateDiagnostics} from '../core.mjs';
 function mk(status='ACTIVE',token='ERC20',addr=WETH){return {id:'A',buy:[{item_type:token,contract_address:addr,start_amount:'2000000000000000'}],sell:[{item_type:'ERC721',contract_address:COLLECTIONS[0].address,token_id:'42',start_amount:'1'}],status:{name:status},updated_at:'2026-11-05T11:00:00Z'};}
 test('ETH amount conversion',()=>{assert.equal(weiToEth('1000000000000000000'),1);assert.equal(weiToEth('500000000000000'),0.0005);});
 test('accepts known bridged ETH only (NOT native IMX or unknown ERC20)',()=>{
@@ -36,4 +36,25 @@ test('Immutable timestamps: numbers, seconds strings, millisecond strings, ISO d
  const sample=mk('FILLED');sample.updated_at='1697498374';
  assert.equal(normalizeOrder(sample,COLLECTIONS[0],'FILLED').timestamp,target);
  assert.equal(orderRejectionReason(mk('ACTIVE','NATIVE'),COLLECTIONS[0]),'not ERC20 priced');
+});
+
+test('candidate diagnostics partition every listing by first reason, without relaxing filters',()=>{
+ const d=fixtures();const rows=analyze(d.listings,d.filled,DEFAULT_SETTINGS);
+ const missing={...rows[0],id:'bad',metadataResolved:false,eligible:false};
+ const insufficient={...rows[0],id:'thin',sales30d:1,reference:null,eligible:false};
+ const result=candidateDiagnostics([...rows,missing,insufficient],DEFAULT_SETTINGS);
+ assert.equal(result.eligible,1);assert.equal(result.missingMetadata,1);
+ assert.equal(result.insufficientComparableSales,1);
+ assert.equal(Object.values(result).reduce((a,b)=>a+b,0),3);
+});
+
+test('persisted unresolved sales become comparable when metadata is indexed later',()=>{
+ const d=fixtures();
+ const unknownSales=d.filled.map(x=>({...x,key:`${x.contract}|token:${x.tokenId}`,metadataResolved:false,name:'Unresolved NFT'}));
+ assert.equal(analyze(d.listings,unknownSales,DEFAULT_SETTINGS)[0].eligible,false);
+ const cache={[`${d.listings[0].contract}|${d.listings[0].tokenId}`]:{name:'Test Furni'}};
+ const indexed=hydrateNames(unknownSales,cache);
+ assert.equal(indexed[0].metadataResolved,true);
+ const indexedListings=hydrateNames([{...d.listings[0],key:`${d.listings[0].contract}|token:${d.listings[0].tokenId}`,metadataResolved:false}],cache);
+ assert.equal(analyze(indexedListings,indexed,DEFAULT_SETTINGS)[0].eligible,true);
 });
