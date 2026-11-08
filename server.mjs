@@ -78,7 +78,7 @@ async function scan(){if(scanning||updating)return;scanning=true;
   const {listings,filled}=r;
   warnings=r.warnings;
   stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics,coverage:r.coverage,candidateDiagnostics:null,historyPending:r.historyPending,historyCompleted:r.historyCompleted};
-  if(r.truncated)warnings.unshift('PARTIAL COVERAGE: not every listing or past sale was downloaded; signals are based on a limited sample of REAL trades.');
+  if(r.truncated)warnings.unshift('PARTIAL ACTIVE COVERAGE: at least one collection has more live offers than were retrieved. The page limit or a failed request interrupted its scan; see collection details.');
   // Refresh historical records as metadata arrives. Earlier versions persisted
   // unresolved FILLED orders permanently, even when subsequent scans found identity.
   const salesById=new Map(state.historicalSales.map(s=>[s.id,s]));
