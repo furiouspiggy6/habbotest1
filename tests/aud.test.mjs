@@ -63,7 +63,7 @@ test('dashboard uses only AUD money inputs and preserves single initialization',
  assert.match(js,/audCash\(val\)/);
  assert.match(js,/function inspectPrice\(value\)\{return audCash\(value\);\}/);
  assert.match(js,/audLimit\(data\.liveSpentTodayAud\)/);
- assert.match(server,/price_aud,median_aud,total_cost_aud/);
+ assert.match(server,/price_aud,historical_30d_median_aud,conservative_resale_ceiling_aud,next_competitor_ask_aud/);
  assert.doesNotMatch(server,/price_weth,median_weth/);
  const trade=readFileSync(resolve(root,'trade.mjs'),'utf8');
  assert.match(trade,/fresh\.totalWithFeesEth<settings\.minimumTotalPriceEth/);
