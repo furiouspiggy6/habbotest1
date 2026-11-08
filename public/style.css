@@ -33,3 +33,7 @@ body.inspect-open{overflow:hidden}
 .inspect-warning{color:#c3b49a;background:#30291f;border:1px solid #66543e;border-radius:9px;padding:12px 14px;font-size:11px;line-height:1.7}
 .inspect-meta{color:#8ea6b7;font-size:11px;overflow-wrap:anywhere;line-height:1.65;margin-top:12px}
 @media(max-width:760px){.inspect-dialog{width:100%;max-height:96vh}.inspect-metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.inspect-rows{grid-template-columns:1fr}.inspect-heading,.inspect-content{padding:18px}.inspect-overlay{padding:7px}}
+
+/* v2.0.10: Consistent fiat min-price controls and live conversion status. */
+.field-label select{display:block;width:100%;padding:11px;margin-top:8px;font-size:12px}
+#fiatRateText{line-height:1.55;max-width:700px}
