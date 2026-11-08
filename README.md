@@ -213,3 +213,7 @@ feed. Immutable API failures and incomplete coverage are never suppressed.
 ## v2.0.4: desktop updater release-status verification
 
 The desktop app now verifies the latest published Windows release against GitHub's Releases API independently of electron-updater. If an auto-update check incorrectly reports no update while a newer stable installer and `latest.yml` exist, the app explicitly reports the version mismatch and provides a button to open the **official GitHub installer** instead of displaying the false "up to date" message. This fallback does not execute unknown files automatically. It validates the expected Windows asset name and official GitHub URL, and does not transmit local settings or wallet information. Automatic updating remains the primary path. A successful Windows build still must publish both the installer and `latest.yml` on GitHub.
+
+## v2.0.5: valid decimal trading settings
+
+The browser's built-in HTML `step` validation incorrectly rejected valid amounts such as `0.015` WETH per NFT and `0.05` WETH daily budget because the increments started at a non-zero minimum. WETH budgets/prices and fractional percentage fields now use `step="any"`; server-side numeric ranges and existing real-money buying safeguards are unchanged. Count and timing fields remain integers. A regression test covers the previously rejected default amounts and the full set of decimal controls.
