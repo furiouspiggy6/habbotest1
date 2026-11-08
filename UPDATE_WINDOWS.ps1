@@ -24,7 +24,7 @@ function Launch-App {
 $stage = Join-Path $updates ('stage-' + $Version + '-' + [guid]::NewGuid().ToString('N'))
 $backup = Join-Path $updates ('backup-' + (Get-Date -Format 'yyyyMMdd-HHmmss'))
 $files = @('package.json','package-lock.json','README.md','.gitignore','.env.example',
-           'START_WINDOWS.bat','UPDATE_WINDOWS.ps1','core.mjs','market.mjs',
+           'START_WINDOWS.bat','UPDATE_WINDOWS.ps1','REPAIR_WINDOWS.ps1','core.mjs','market.mjs',
            'trade.mjs','server.mjs','updates.mjs','public','tests')
 $installedModules = Join-Path $InstallDir 'node_modules'
 $backupModules = Join-Path $backup 'node_modules'
