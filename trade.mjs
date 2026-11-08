@@ -10,6 +10,10 @@ const extractOrder=x=>x?.result?.result??x?.result??x;
 export async function executeLiveBuy(candidate,settings,privateKey){
  if(!/^0x[a-fA-F0-9]{64}$/.test(privateKey||''))throw new Error('Dedicated wallet private key not configured.');
  if(!candidate?.eligible||candidate.quantity!==1||candidate.currency!=='WETH'||!CONTRACTS.has(candidate.contract))throw new Error('Candidate is not an approved ERC721/1155 ETH listing.');
+ if(candidate.marketEvidencePassed!==true||candidate.conservativeDiscountPassed!==true||
+    candidate.conservativeNetEdgePassed!==true||candidate.minProfitPassed!==true||
+    !Number.isFinite(candidate.conservativeResaleEth)||candidate.conservativeResaleEth<=0)
+  throw new Error('Current comparable asks or conservative resale margins are insufficient; live buying blocked.');
  const {orderbook,pkg}=await makeClients(settings.publishableKey);
  const {Wallet,JsonRpcProvider,Contract,formatEther}=await import('ethers');
  const provider=new JsonRpcProvider('https://rpc.immutable.com',13371);
@@ -23,13 +27,20 @@ export async function executeLiveBuy(candidate,settings,privateKey){
  if(fresh.price<settings.minPriceEth)throw new Error('Price below the minimum safety floor.');
  if(settings.minimumTotalPriceEth>0&&fresh.totalWithFeesEth<settings.minimumTotalPriceEth)throw new Error('Fresh order is below the configured AUD minimum, including buyer fees.');
  const checkProfit=cost=>{
-  const ref=Number(candidate.reference),qty=Number(candidate.quantity);
+  const ref=Number(candidate.conservativeResaleEth),qty=Number(candidate.quantity);
   const fee=Number(settings.estimatedResaleFeesPct);
   if(!Number.isFinite(ref)||ref<=0||!Number.isFinite(qty)||qty!==1||!Number.isFinite(fee))
    throw new Error('Reference price or resale fee is not verifiable.');
   const estimatedProfit=ref*qty*(1-fee/100)-cost;
+  const afterExtra=estimatedProfit-Number(settings.estimatedExtraCostsEth??0);
+  const adjustedNetEdge=cost>0?afterExtra/cost*100:NaN;
+  const adjustedDiscount=(1-Number(candidate.price)/ref)*100;
   if(!Number.isFinite(estimatedProfit)||estimatedProfit+1e-12<Number(settings.minimumProfitEth??0))
-   throw new Error('Updated order falls below the minimum estimated AUD profit.');
+   throw new Error('Updated order falls below conservative resale profit requirement.');
+  if(!Number.isFinite(adjustedNetEdge)||adjustedNetEdge+1e-9<Number(settings.minNetEdgePct??0))
+   throw new Error('Updated order falls below conservative net edge requirement.');
+  if(!Number.isFinite(adjustedDiscount)||adjustedDiscount+1e-9<Number(settings.minDiscountPct??0))
+   throw new Error('Updated order lacks sufficient discount to conservative resale ceiling.');
  };
  checkProfit(fresh.totalWithFeesEth);
  // ERC20 approval is intentionally NEVER auto signed (could be unlimited).
