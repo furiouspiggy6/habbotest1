@@ -44,3 +44,8 @@ body.inspect-open{overflow:hidden}
 .cheapest-toggle input{width:16px;height:16px;accent-color:var(--mint);cursor:pointer}
 .grouping-note{color:#7f96ab;font-size:10px}
 @media(max-width:690px){.listing-visibility{padding-left:14px;padding-right:14px}}
+/* v2.0.15: show actual listing and expiry times without compressing price columns. */
+.market-table{min-width:880px}
+.market-table th:nth-child(6),.market-table th:nth-child(7),
+.market-table td:nth-child(6),.market-table td:nth-child(7){font-size:10px;color:#a5b7c7}
+
