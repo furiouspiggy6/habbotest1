@@ -11,7 +11,7 @@ export const COLLECTIONS = [
 ];
 export const DEFAULT_SETTINGS = Object.freeze({
   mode:'live', refreshSeconds:90, pagesPerCollection:20,
-  minDiscountPct:25, minSales30d:3, minNetEdgePct:12,
+  minDiscountPct:25, minSales30d:3, minNetEdgePct:12, minEstimatedProfitAud:1,
   estimatedResaleFeesPct:7.5, maximumPriceEth:0.015,
   minPriceEth:0.00005, minimumFiatPrice:5, fiatCurrency:'AUD', dailyBudgetEth:0.05, maxPurchasesPerDay:5,
   maximumPriceAud:null, dailyBudgetAud:null, minPriceAud:null,
@@ -155,12 +155,26 @@ export function audLimitSummary(settings,quote,now=Date.now()){
 }
 export function applyFiatMinimum(rows,settings,quote,now=Date.now()){
  const threshold=fiatMinimumStatus(settings,quote,now);
+ const minimumProfitAud=Number(settings?.minEstimatedProfitAud??0);
+ const resaleFeesPct=Number(settings?.estimatedResaleFeesPct);
  return rows.map(row=>{
   const total=Number(row.totalWithFeesEth);
   const estimatedFiatCost=threshold.available&&Number.isFinite(total)?total*threshold.spot:null;
   const fiatMinPassed=!threshold.required||
    (estimatedFiatCost!==null&&estimatedFiatCost+1e-8>=threshold.minimum);
-  return {...row,estimatedFiatCost,fiatMinPassed,eligible:row.eligible===true&&fiatMinPassed};
+  // Same fee-aware resale projection used by Inspect. This is an estimate,
+  // not a guaranteed floor bid: realized proceeds and gas may differ.
+  const reference=row.reference===null||row.reference===undefined?null:Number(row.reference);
+  const qty=Number(row.quantity);
+  const estimatedProfitEth=reference!==null&&Number.isFinite(reference)&&reference>0&&
+   Number.isFinite(qty)&&qty>0&&Number.isFinite(total)&&
+   Number.isFinite(resaleFeesPct)
+    ?reference*qty*(1-resaleFeesPct/100)-total:null;
+  const estimatedProfitAud=threshold.available&&estimatedProfitEth!==null?estimatedProfitEth*threshold.spot:null;
+  const minProfitPassed=estimatedProfitAud!==null &&
+   estimatedProfitAud+1e-8>=minimumProfitAud;
+  return {...row,estimatedFiatCost,fiatMinPassed,estimatedProfitEth,
+   estimatedProfitAud,minProfitPassed,eligible:row.eligible===true&&fiatMinPassed&&minProfitPassed};
  });
 }
 
@@ -196,7 +210,8 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
    listedAt:row.listedAt??null,startsAt:row.startsAt??null,expiresAt:row.expiresAt??null,
    floor:row.floor??null,
    eligible:row.eligible===true,metadataResolved:row.metadataResolved===true,image:row.image||'',
-    estimatedFiatCost:row.estimatedFiatCost??null,fiatMinPassed:row.fiatMinPassed!==false},
+    estimatedFiatCost:row.estimatedFiatCost??null,fiatMinPassed:row.fiatMinPassed!==false,
+    estimatedProfitAud:row.estimatedProfitAud??null,minProfitPassed:row.minProfitPassed!==false},
   lastScan,marketplaceUrl:marketplaceSearchUrl(row),
   estimate:{resaleFeePct,expectedProceedsEth:expectedProceeds===null?null:round(expectedProceeds,10),
    estimatedProfitEth:profit===null?null:round(profit,10),estimatedRoiPct:roi===null?null:round(roi,1)},
@@ -209,7 +224,7 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
 }
 /** Explain why genuine listings are not actionable; first blocking gate per NFT. */
 export function candidateDiagnostics(rows,settings){
- const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,belowFiatMinimum:0,discountTooSmall:0,netEdgeTooSmall:0,multiQuantity:0};
+ const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,belowFiatMinimum:0,discountTooSmall:0,netEdgeTooSmall:0,belowEstimatedProfit:0,multiQuantity:0};
  for(const r of rows){
   if(r.eligible){counts.eligible++;continue;}
   if(!r.metadataResolved){counts.missingMetadata++;continue;}
@@ -219,6 +234,7 @@ export function candidateDiagnostics(rows,settings){
   if(r.fiatMinPassed===false){counts.belowFiatMinimum++;continue;}
   if(!Number.isFinite(r.discount)||r.discount<settings.minDiscountPct){counts.discountTooSmall++;continue;}
   if(!Number.isFinite(r.netEdge)||r.netEdge<settings.minNetEdgePct){counts.netEdgeTooSmall++;continue;}
+  if(r.minProfitPassed===false){counts.belowEstimatedProfit++;continue;}
   // Never silently label a listing actionable if a future safety gate is added.
   counts.insufficientComparableSales++;
  }
@@ -232,7 +248,7 @@ export function candles(sales,key,now=Date.now()){
 }
 export function validateSettings(s){
  const n=JSON.parse(JSON.stringify(DEFAULT_SETTINGS));
- for(const [k,min,max] of [['refreshSeconds',30,900],['pagesPerCollection',1,40],['minDiscountPct',0,95],['minSales30d',3,100],['minNetEdgePct',0,1000],['estimatedResaleFeesPct',0,60],['maximumPriceEth',0.00001,2],['dailyBudgetEth',0.0001,5],['minPriceEth',0,0.5],['minimumFiatPrice',0,100000],['maxPurchasesPerDay',1,50]]){
+ for(const [k,min,max] of [['refreshSeconds',30,900],['pagesPerCollection',1,40],['minDiscountPct',0,95],['minSales30d',3,100],['minNetEdgePct',0,1000],['estimatedResaleFeesPct',0,60],['maximumPriceEth',0.00001,2],['dailyBudgetEth',0.0001,5],['minPriceEth',0,0.5],['minimumFiatPrice',0,100000],['minEstimatedProfitAud',0,1000000],['maxPurchasesPerDay',1,50]]){
   const x=Number(s?.[k]??n[k]);if(!Number.isFinite(x)||x<min||x>max)throw new Error(`${k} must be between ${min} and ${max}`);
   n[k]=['refreshSeconds','pagesPerCollection','minSales30d','maxPurchasesPerDay'].includes(k)?Math.floor(x):x;
  }
