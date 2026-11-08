@@ -232,3 +232,9 @@ The **Search on TokenTrove** button opens the relevant verified collection searc
 ## v2.0.9: retry transient Immutable timeouts
 
 Immutable REST calls now use a bounded 20-second timeout and retry one transient timeout after a one-second pause, in addition to the existing retry for HTTP 429/5xx. Expired timeouts no longer immediately terminate a collection scan. If the second request fails, the scanner retains completed pages and accurately reports the interrupted ACTIVE coverage. Authorization failures are never retried. Deep scans can still encounter API limits; no guarantee of full coverage.
+
+## v2.0.10: $5 minimum purchase price in AUD or USD
+
+Strategy & Settings → Spending protection now includes a **Minimum purchase price ($)** field (default **5**) and a **Dollar currency** selector (default **AUD**, also supports **USD**). The scanner uses a live public CoinGecko ETH/AUD and ETH/USD spot price, refreshed approximately every five minutes, to estimate the amount of bridged WETH corresponding to the minimum. It measures the **total purchase cost including the listing's buyer fees**, not just the nominal token price. Historical-sale discounts, WETH minimum/maximum limits, and transaction safety checks remain unchanged; a listing must pass **all** filters.
+
+The conversion is approximate, not a live WETH redemption quote. The ETH spot rate must have been fetched within the previous 15 minutes; otherwise **every positive-fiat-floor candidate is disqualified, and live autobuying cannot be armed**. The app still shows real NFT listings, explains the quote problem, and retries the public spot feed periodically. Existing saved settings automatically receive the A$5 minimum on upgrade. Set the dollar minimum to **0** to disable the additional rule. Changing the fiat floor/currency disarms the autobuyer. This feature does not require a wallet and does not enable real-money trading.
