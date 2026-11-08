@@ -113,3 +113,7 @@ Node 24+ includes the required `fetch` API. The Windows launcher does not run `n
 **Experimental live buying remains OFF by default.** Its existing code uses the separate Immutable transaction SDK and ethers, which are not installed by default in v1.0.7 and have not been validated for real-money execution. Leave live buying disabled while checking price-history quality, liquidity, marketplace coverage and security. Installing the optional trading dependencies is a separate step for future audited releases, not a requirement for market scanning.
 
 The first v1.0.7 scan and auto-updater still require internet access; the GitHub release installs through the app's automatic updater if v1.0.6 is installed and auto-update is enabled.
+
+### Windows updater compatibility (v1.0.8)
+
+The updater handles dependency-free releases without expecting `node_modules`. A single small, audited, pure-JS `semver` package is retained in this release so older update scripts can upgrade in place without failing when their staging install looks for `node_modules`. The SDK is **not** installed automatically and is **not** needed to display live market data. The full legacy trading SDK remains experimental and unused during scanning.
