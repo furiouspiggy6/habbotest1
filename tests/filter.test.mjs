@@ -8,7 +8,7 @@ const read=p=>readFileSync(resolve(root,p),'utf8');
 
 test('scanner defaults to AUD price-range visibility but retains candidates and all listings',()=>{
  const html=read('public/index.html');
- assert.match(html,/<select id="signalFilter"[^>]*><option value="range" selected>Within my price range<\/option>/);
+ assert.match(html,/<select id="signalFilter"[^>]*><option value="auto" selected>Automated decisions<\/option>/);
  assert.match(html,/<option value="eligible">Candidates only<\/option>/);
  assert.match(html,/<option value="all">All listings<\/option>/);
 });
@@ -18,7 +18,7 @@ test('AUD price range uses displayed listing price and fee-inclusive total, with
  assert.match(js,/Number\(row\.price\)\*spot/);
  assert.match(js,/Number\(row\.totalWithFeesEth\)\*spot/);
  assert.match(js,/list>=minimum&&total>=withFees&&total<=maximum/);
- assert.match(js,/signal==='eligible'\?x\.eligible:withinAudRange\(x\)/);
+ assert.match(js,/signal==='eligible'\?x\.eligible:signal==='auto'/);
  assert.match(js,/signal==='all'/);
  assert.match(js,/visibleRows=found/);
  assert.match(js,/function selectedRow\(\)\{return visibleRows\.find/);
