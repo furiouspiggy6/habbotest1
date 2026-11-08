@@ -59,3 +59,12 @@ body.inspect-open{overflow:hidden}
 .external-table td a{font-size:11px}
 #openSeaStatus{white-space:nowrap}
 #clearOpenSeaKey{accent-color:var(--mint);width:16px;height:16px}
+
+/* v2.0.17: explicit health check for the locally saved OpenSea API key. */
+.open-sea-check-row{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:14px 0 7px}
+.open-sea-key-status{display:inline-flex;align-items:center;border:1px solid #556375;background:#1c2936;border-radius:30px;padding:9px 12px;color:#b7c9d7;font-size:11px;font-weight:800;letter-spacing:.3px}
+.open-sea-key-status[data-status="connected"]{color:#7ef3cf;background:#143c34;border-color:#247b65}
+.open-sea-key-status[data-status="invalid"],.open-sea-key-status[data-status="forbidden"],.open-sea-key-status[data-status="error"]{color:#ffc2c5;background:#462631;border-color:#93515c}
+.open-sea-key-status[data-status="rate-limited"],.open-sea-key-status[data-status="checking"]{color:#f4ce91;background:#423424;border-color:#8a683f}
+#testOpenSeaBtn:disabled{opacity:.5;cursor:default;transform:none}
+#openSeaConnectionDetails{overflow-wrap:anywhere;line-height:1.6}
