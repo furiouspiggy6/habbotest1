@@ -54,3 +54,15 @@ test('desktop update check independently compares GitHub release rather than fal
  assert.match(app,/nativeFallbackBtn/);
  assert.match(html,/id="nativeFallbackBtn"/);
 });
+
+test('auto-update uses the exact verified release instead of GitHub provider stale latest.yml',()=>{
+ const main=read('desktop/main.cjs');
+ const release=read('desktop/release-check.cjs');
+ const code=main.split('async function checkForUpdates()')[1].split('async function installWhenSafe()')[0];
+ assert.match(code,/autoUpdater\.setFeedURL\(\{provider:'generic',url:latestGitHubRelease\.feedUrl/);
+ assert.match(code,/if\(!latestGitHubRelease\.newer\)/);
+ assert.match(code,/nativeVersion===latestGitHubRelease\.version/);
+ assert.match(main,/info\?\.version!==latestGitHubRelease\.version/);
+ assert.match(release,/manifest\.browser_download_url!==manifestUrl/);
+ assert.match(release,/const feedUrl=`https:\/\/github\.com\/\$\{REPO\}\/releases\/download\//);
+});
