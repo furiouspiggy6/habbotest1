@@ -20,8 +20,33 @@ export const round=(v,d=8)=>Number(Number(v).toFixed(d));
 export const median=values=>{const a=values.filter(x=>Number.isFinite(x)&&x>0).sort((a,b)=>a-b); if(!a.length)return null;const p=Math.floor(a.length/2);return a.length%2?a[p]:(a[p-1]+a[p])/2;};
 export const weiToEth=v=>{try {if(!/^\d+$/.test(String(v)))return NaN;return Number(BigInt(v))/1e18;}catch{return NaN;}};
 const rawValue=i=>i?.start_amount??i?.startAmount??i?.amount??i?.end_amount??i?.endAmount;
-const safeTime=v=>{const d=(typeof v==='number'?new Date(v>1e12?v:v*1000):new Date(v));return Number.isFinite(d.getTime())?d.getTime():0;};
+export const safeTime=v=>{
+ if(v===undefined||v===null||v==='')return 0;
+ const numeric=(typeof v==='number'&&Number.isFinite(v))||(typeof v==='string'&&/^\d{10,13}$/.test(v.trim()));
+ const value=numeric?Number(v):null;
+ const d=numeric?new Date(value>=1e12?value:value*1000):new Date(v);
+ return Number.isFinite(d.getTime())?d.getTime():0;
+};
 const unwrap=raw=>raw?.result?.result??raw?.result??raw;
+export function orderRejectionReason(input,collection,status='ACTIVE'){
+ const raw=unwrap(input);
+ if(!raw?.id)return 'missing order ID';
+ if(!Array.isArray(raw.buy)||!Array.isArray(raw.sell)||raw.buy.length!==1||raw.sell.length!==1)return 'unsupported order shape';
+ const buy=raw.buy[0],sell=raw.sell[0];
+ const actual=String(raw.status?.name??raw.status??'').toUpperCase();
+ if(actual&&actual!==status)return 'status mismatch';
+ if(String(buy.item_type??buy.type??'').toUpperCase()!=='ERC20')return 'not ERC20 priced';
+ if(String(buy.contract_address??buy.contractAddress??'').toLowerCase()!==WETH)return 'not WETH priced';
+ if(!['ERC721','ERC1155'].includes(String(sell.item_type??sell.type??'').toUpperCase()))return 'not NFT';
+ if(String(sell.contract_address??sell.contractAddress??'').toLowerCase()!==collection.address.toLowerCase())return 'collection mismatch';
+ if(!/^\d+$/.test(String(sell.token_id??sell.tokenId??'')))return 'missing token ID';
+ const quantity=Number(rawValue(sell)??'1');
+ if(!Number.isSafeInteger(quantity)||quantity<=0)return 'invalid quantity';
+ if(!Number.isFinite(weiToEth(rawValue(buy)))||weiToEth(rawValue(buy))<=0)return 'invalid quote';
+ const d=raw.updated_at??raw.update_time??raw.updatedAt??raw.created_at??raw.create_time;
+ if(status==='FILLED'&&!safeTime(d))return 'invalid sale timestamp';
+ return 'other unsupported order';
+}
 export function normalizeOrder(input,collection,status='ACTIVE'){
  const raw=unwrap(input);
  if(!raw?.id || !Array.isArray(raw.buy) || !Array.isArray(raw.sell) || raw.buy.length!==1 ||raw.sell.length!==1)return null;
