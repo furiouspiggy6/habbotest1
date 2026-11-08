@@ -100,6 +100,22 @@ export function analyze(listings,filled,settings,now=Date.now()){
    discount:discount===null?null:round(discount,1),netEdge:netEdge===null?null:round(netEdge,1),eligible};
  }).sort((a,b)=>Number(b.eligible)-Number(a.eligible)||(b.discount??-1000)-(a.discount??-1000));
 }
+/** Explain why genuine listings are not actionable; first blocking gate per NFT. */
+export function candidateDiagnostics(rows,settings){
+ const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,discountTooSmall:0,netEdgeTooSmall:0,multiQuantity:0};
+ for(const r of rows){
+  if(r.eligible){counts.eligible++;continue;}
+  if(!r.metadataResolved){counts.missingMetadata++;continue;}
+  if(!Number.isFinite(r.reference)||r.sales30d<settings.minSales30d){counts.insufficientComparableSales++;continue;}
+  if(r.quantity!==1){counts.multiQuantity++;continue;}
+  if(r.price<settings.minPriceEth||r.totalWithFeesEth>settings.maximumPriceEth){counts.priceOutsideLimits++;continue;}
+  if(!Number.isFinite(r.discount)||r.discount<settings.minDiscountPct){counts.discountTooSmall++;continue;}
+  if(!Number.isFinite(r.netEdge)||r.netEdge<settings.minNetEdgePct){counts.netEdgeTooSmall++;continue;}
+  // Never silently label a listing actionable if a future safety gate is added.
+  counts.insufficientComparableSales++;
+ }
+ return counts;
+}
 export function candles(sales,key,now=Date.now()){
  const valid=sales.filter(s=>s.key===key&&s.metadataResolved&&s.timestamp<=now&&now-s.timestamp<=90*86400000).sort((a,b)=>a.timestamp-b.timestamp);
  const result=new Map();for(const s of valid){const day=new Date(s.timestamp).toISOString().slice(0,10);
