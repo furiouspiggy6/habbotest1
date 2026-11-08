@@ -37,7 +37,7 @@ test('desktop receives all listings on demand, not a hard cap of 800, and shows 
 
 test('all decimal WETH and percentage settings accept valid values without HTML step mismatch',()=>{
  const html=read('public/index.html');
- for(const id of ['maximumPriceEth','dailyBudgetEth','minPriceEth','minDiscountPct','minNetEdgePct','estimatedResaleFeesPct']){
+ for(const id of ['maximumPriceAud','dailyBudgetAud','minPriceAud','minimumFiatPrice','minDiscountPct','minNetEdgePct','estimatedResaleFeesPct']){
   assert.match(html,new RegExp('id="'+id+'"[^>]*\\bstep="any"'));
  }
  // Non-decimal controls remain explicitly integral.
