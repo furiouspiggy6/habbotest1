@@ -22,7 +22,7 @@ export function cheapestPerCollectible(rows){
   const costA=Number(row.totalWithFeesEth),costB=Number(previous.row.totalWithFeesEth);
   const feeA=Number.isFinite(costA)&&costA>=0?costA:Infinity;
   const feeB=Number.isFinite(costB)&&costB>=0?costB:Infinity;
-  if(priceA<priceB||(priceA===priceB&&feeA<feeB))previous.row=row;
+  if(feeA<feeB||(feeA===feeB&&priceA<priceB))previous.row=row;
  }
  return [...groups.values()].map(({row,count})=>({...row,groupedOfferCount:count}));
 }
