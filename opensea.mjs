@@ -37,7 +37,7 @@ export async function fetchOpenSeaAvatarListings(apiKey,{fetcher=globalThis.fetc
  const key=String(apiKey??'').trim();
  if(!key)return {status:'needs-key',rows:[],pages:0,truncated:false,error:'Set a read-only OpenSea API key in Settings to enable Ethereum Habbo Avatar listings.'};
  if(!/^[\x21-\x7e]{10,512}$/.test(key))return {status:'error',rows:[],pages:0,truncated:false,error:'OpenSea API key format is invalid'};
- let next=null,pages=0,truncated=false,firstError='';
+ let next=null,pages=0,truncated=false,firstError='',httpStatus=null;
  const found=new Map(),cursors=new Set();
  for(let i=0;i<Math.min(Math.max(Number(maxPages)||1,1),3);i++){
   const url=new URL(API);url.searchParams.set('limit','100');
@@ -46,7 +46,7 @@ export async function fetchOpenSeaAvatarListings(apiKey,{fetcher=globalThis.fetc
   try{
    response=await fetcher(url.href,{method:'GET',headers:{Accept:'application/json','X-API-KEY':key},signal:AbortSignal.timeout(15000)});
   }catch(err){firstError='OpenSea request timed out or failed: '+String(err?.message??err).slice(0,100);break;}
-  if(!response.ok){firstError='OpenSea HTTP '+response.status+(response.status===401||response.status===403?' (check API key)':response.status===429?' (rate-limited)':'');break;}
+  if(!response.ok){httpStatus=response.status;firstError='OpenSea HTTP '+response.status+(response.status===401||response.status===403?' (check API key)':response.status===429?' (rate-limited)':'');break;}
   let payload;
   try{payload=await response.json();}catch{firstError='OpenSea sent invalid JSON';break;}
   if(!Array.isArray(payload?.listings)){firstError='OpenSea response did not include a listings array';break;}
@@ -62,6 +62,26 @@ export async function fetchOpenSeaAvatarListings(apiKey,{fetcher=globalThis.fetc
  truncated=Boolean(next);
  return {status:firstError?(pages?'partial':'error'):'connected',
   rows:[...found.values()].sort((a,b)=>a.buyerTotalEth-b.buyerTotalEth),
-  pages,truncated,error:firstError,
+  pages,truncated,error:firstError,httpStatus,
   source:'OpenSea API v2 · Ethereum Habbo Avatars only',checkedAt:Date.now()};
+}
+
+/**
+ * Successful OpenSea listing reads verify authentication even when the collection
+ * has zero active orders. No credentials are included in this summary.
+ */
+export function summarizeOpenSeaConnection(feed){
+ const checkedAt=Number(feed?.checkedAt)||Date.now();
+ if(feed?.status==='needs-key')return {status:'needs-key',checkedAt,message:'No OpenSea API key has been saved.'};
+ if(feed?.status==='connected'||feed?.status==='partial')
+  return {status:'connected',checkedAt,message:feed.status==='partial'
+   ?'OpenSea accepted the saved API key, but listing pagination was interrupted. Check the feed for details.'
+   :'OpenSea accepted the saved API key. The listing endpoint responded successfully.'};
+ const code=Number(feed?.httpStatus);
+ if(code===401)return {status:'invalid',checkedAt,message:'OpenSea rejected this API key (401). It may be expired or incorrect. Generate a replacement and save it.'};
+ if(code===403)return {status:'forbidden',checkedAt,message:'OpenSea denied access (403). Check the saved key and API permissions.'};
+ if(code===429)return {status:'rate-limited',checkedAt,message:'OpenSea rate limit reached (429). Try again after the API limit resets; do not repeatedly test.'};
+ return {status:'error',checkedAt,message:feed?.error==='OpenSea API key format is invalid'
+  ?'The saved OpenSea API key format is invalid. Replace it in Settings.'
+  :'Could not verify OpenSea access. Check your connection and the marketplace feed diagnostics.'};
 }
