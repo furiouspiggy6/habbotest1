@@ -6,6 +6,7 @@ on:
       - 'desktop/**'
       - 'build/**'
       - 'public/**'
+      - 'tests/**'
       - 'core.mjs'
       - 'opportunity.mjs'
       - 'market.mjs'
