@@ -78,3 +78,80 @@ export function sortByOpportunity(rows){
   (b.estimatedProfitAud??-Infinity)-(a.estimatedProfitAud??-Infinity)||
   (b.discount??-Infinity)-(a.discount??-Infinity));
 }
+
+/**
+ * Conservative, auditable resale ceiling. Other ACTIVE asks are seller prices,
+ * not executable bids, so 2% undercutting is an assumption, not a sale promise.
+ * Critically, an old 30D median may NEVER override lower observed competition.
+ *
+ * A separate comparable current ask is mandatory to qualify for live buying:
+ * without one the projected value is historical-only and must remain WATCH.
+ * Calling this before scoring ensures the rank and all buy gates use the same
+ * (possibly negative) fee-adjusted profit rather than a stale historical median.
+ */
+export function applyConservativeResale(rows,history,settings,{now=Date.now(),audSpot=null,undercutPct=2}={}){
+ const asks=new Map(),sales7=new Map();
+ for(const r of rows){
+  const k=identity(r);
+  if(!k||Number(r.quantity)!==1||!finite(r.price)||r.price<=0)continue;
+  if(r.expiresAt&&Number(r.expiresAt)<=now)continue;
+  if(r.startsAt&&Number(r.startsAt)>now)continue;
+  if(!asks.has(k))asks.set(k,[]);
+  asks.get(k).push(r);
+ }
+ for(const s of history){
+  const k=identity(s),time=Number(s.timestamp),price=Number(s.price);
+  if(!k||!finite(time)||time>now||now-time>7*DAY||!finite(price)||price<=0)continue;
+  if(!sales7.has(k))sales7.set(k,[]);
+  sales7.get(k).push(price);
+ }
+ const fee=Number(settings?.estimatedResaleFeesPct);
+ const extra=Number(settings?.estimatedExtraCostsAud??0);
+ const minProfit=Number(settings?.minEstimatedProfitAud??0);
+ const minNetEdge=Number(settings?.minNetEdgePct??0);
+ const minDiscount=Number(settings?.minDiscountPct??0);
+ const spot=Number(audSpot);
+ const rateValid=finite(spot)&&spot>0;
+ const undercut=1-clamp(Number(undercutPct),0,20)/100;
+ return rows.map(row=>{
+  const k=identity(row),cost=Number(row.totalWithFeesEth),reference=Number(row.reference);
+  const otherAsks=k?(asks.get(k)||[]).filter(x=>String(x.id)!==String(row.id)):[];
+  const nextAsk=otherAsks.length?Math.min(...otherAsks.map(x=>x.price)):null;
+  const recentPrices=k?(sales7.get(k)||[]):[];
+  const sevenDayMedian=recentPrices.length>=3?median(recentPrices):null;
+  const caps=[
+   finite(reference)&&reference>0?{source:'30-day completed-sale median',value:reference}:null,
+   sevenDayMedian!==null?{source:'7-day completed-sale median',value:sevenDayMedian}:null,
+   nextAsk!==null?{source:'2% under next competing ACTIVE asking price',value:nextAsk*undercut}:null
+  ].filter(Boolean);
+  const best=caps.length?caps.reduce((a,b)=>a.value<=b.value?a:b):null;
+  const resale=best?.value??null;
+  const profitEth=resale!==null&&finite(fee)&&finite(cost)&&cost>0?
+   resale*(1-fee/100)-cost:null;
+  const beforeExtra=profitEth!==null&&rateValid?profitEth*spot:null;
+  const profitAud=beforeExtra!==null?beforeExtra-extra:null;
+  const netEdge=profitAud!==null&&rateValid&&cost>0?profitAud/(cost*spot)*100:null;
+  const conservativeDiscount=resale!==null&&resale>0?100*(1-Number(row.price)/resale):null;
+  const marketEvidencePassed=nextAsk!==null;
+  const minProfitPassed=profitAud!==null&&profitAud+1e-8>=minProfit;
+  const conservativeNetEdgePassed=netEdge!==null&&netEdge+1e-9>=minNetEdge;
+  const conservativeDiscountPassed=conservativeDiscount!==null&&conservativeDiscount+1e-9>=minDiscount;
+  return {...row,
+   historicalProfitAud:row.estimatedProfitAud??null,
+   currentCompetitorAskEth:nextAsk,
+   currentCompetitorCount:otherAsks.length,
+   recentSevenDayMedianEth:sevenDayMedian,
+   conservativeResaleEth:resale,
+   resaleEstimateBasis:best?.source??'No verifiable resale evidence',
+   resaleUndercutPct:clamp(Number(undercutPct),0,20),
+   conservativeDiscountPct:conservativeDiscount,
+   estimatedProfitEth:profitEth,
+   estimatedProfitBeforeExtraCostsAud:beforeExtra,
+   estimatedProfitAud:profitAud,
+   minProfitPassed,marketEvidencePassed,conservativeNetEdgePassed,conservativeDiscountPassed,
+   netEdge:netEdge,
+   eligible:row.eligible===true&&marketEvidencePassed&&minProfitPassed&&
+    conservativeNetEdgePassed&&conservativeDiscountPassed
+  };
+ });
+}
