@@ -102,7 +102,7 @@ function renderStats(){$('statListings').textContent=data.listingCount??0;$('sta
  const cv=data.stats.coverage,cd=data.stats.candidateDiagnostics;
  const coverage=cv?`Verified NFT identity: ${cv.activeResolved}/${cv.activeTotal} active · ${cv.salesResolved}/${cv.salesTotal} sold · ${cv.fetchedThisScan} resolved this scan, ${cv.failedThisScan} failed.`:'Metadata coverage not available yet.';
  const historyLine=`Historical sales: ${data.stats.historyPending??0} collection(s) still indexing older pages; ${data.stats.historyCompleted??0} reached the end this scan. ${data.stats.historicalSales??0} unique sales cached locally.`;
- const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
+ const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.belowEstimatedProfit??0} below A$ profit minimum; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
  $('scanDiagnostics').textContent=([`Immutable scan segments: ${data.stats.successfulRequests??0} completed / ${data.stats.failedRequests??0} failed or interrupted. ${data.stats.rawOrders??0} raw orders received.`,coverage,historyLine,reasons,...data.warnings,`Rejected orders: ${JSON.stringify(data.stats.rejected||{})}`, ...((data.stats.diagnostics||[]).map(d=>`${d.collection} ${d.status}: ${d.error||`${d.accepted}/${d.raw} accepted (${d.pages} pages)${d.shape?' shape='+JSON.stringify(d.shape):''}`}`))].join('\n')); 
 }
 function withinAudRange(row){
@@ -115,8 +115,11 @@ function withinAudRange(row){
   list>=minimum&&total>=withFees&&total<=maximum;
 }
 function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),collection=$('collectionFilter').value,signal=$('signalFilter').value;
+ const minimumProfit=Number(data?.settings?.minEstimatedProfitAud??0);
  const matched=(data?.rows??[]).filter(x=>(!text||(`${x.name} ${x.tokenId} ${x.collection}`).toLowerCase().includes(text))&&(!collection||x.collection===collection)&&
-  (signal==='all'||(signal==='eligible'?x.eligible:withinAudRange(x))));
+  (signal==='all'||(signal==='eligible'?x.eligible:withinAudRange(x)))&&
+  (!$('profitOnly').checked||minimumProfit<=0||
+   (Number.isFinite(Number(x.estimatedProfitAud))&&x.estimatedProfitAud!==null&&x.estimatedProfitAud!==undefined&&x.estimatedProfitAud+1e-8>=minimumProfit)));
  const grouped=$('cheapestOnly').checked;
  const found=grouped?cheapestPerCollectible(matched):matched;
  visibleRows=found;
@@ -132,7 +135,7 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
  $('pageSummary').textContent=found.length?`Showing ${start+1}–${start+limited.length} of ${found.length} · Page ${pageIndex+1}/${totalPages}`:'No matching listings';
  $('pagePrev').disabled=pageIndex===0;
  $('pageNext').disabled=pageIndex>=totalPages-1;
- body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.totalWithFeesEth)}</td><td>${audCash(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td><td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
+ body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.totalWithFeesEth)}</td><td class="${r.estimatedProfitAud!==null&&r.estimatedProfitAud>=0?'positive':'neutral'}">${r.estimatedProfitAud===null||r.estimatedProfitAud===undefined?'—':audLimit(r.estimatedProfitAud)}</td><td>${audCash(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td><td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
  body.querySelectorAll('tr').forEach(tr=>tr.addEventListener('click',()=>{selectedId=tr.dataset.order;renderMarket();void loadChart(true);}));
  body.querySelectorAll('.row-inspect').forEach(btn=>btn.addEventListener('click',event=>{
   event.stopPropagation();selectedId=btn.dataset.inspectOrder;
@@ -156,7 +159,9 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
    help.textContent=`Your range is ${audLimit(data.audLimits?.minPriceAud)} minimum listing price to ${audLimit(data.audLimits?.maximumPriceAud)} maximum total price, plus a ${audLimit(data.settings?.minimumFiatPrice)} minimum including fees. Try “All listings” or change the spending settings.`;
   }else{
    heading.textContent='No listings match these filters.';
-   help.textContent='Clear the search or collection filter. The market still has live listings.';
+   help.textContent=$('profitOnly').checked&&minimumProfit>0?
+    'No listings passed your A$'+minimumProfit.toFixed(2)+' estimated profit minimum. Uncheck the profit filter above to inspect lower-profit items.':
+    'Clear the search or collection filter. The market still has live listings.';
   }
  }
 }
@@ -221,6 +226,7 @@ function renderInspection(info){
    ${inspectPair('Buyer fees shown by Immutable',inspectPrice(r.feeEstimateEth))}
    ${inspectPair('Total purchase cost incl. buyer fees',inspectPrice(r.totalWithFeesEth))}
    ${inspectPair('Dollar minimum satisfied',r.fiatMinPassed?'Yes':'No — listing excluded')}
+   ${inspectPair('Profit requirement satisfied',r.minProfitPassed?'Yes':'No — below configured A$ minimum')}
    ${inspectPair('Assumed resale fee',inspectPct(estimate.resaleFeePct))}
    ${inspectPair('Est. resale proceeds after fee',inspectPrice(estimate.expectedProceedsEth))}
    ${inspectPair('Est. return on purchase cost',inspectPct(estimate.estimatedRoiPct))}
@@ -307,7 +313,7 @@ function renderTrades(){if(!data)return;
  $('eventLog').innerHTML=data.events.length?data.events.slice(0,30).map(e=>`<div class="log-line"><div><div class="log-main">${htmlSafe(e.message)}</div><div class="log-sub">${new Date(e.time).toLocaleString()}</div></div><b class="log-status ${e.kind==='error'?'error':''}">${htmlSafe(e.kind.toUpperCase())}</b></div>`).join(''):'<div class="empty">No events recorded.</div>';
 }
 const audFields=['maximumPriceAud','dailyBudgetAud','minPriceAud'];
-const fields=['minDiscountPct','minSales30d','minNetEdgePct','estimatedResaleFeesPct','minimumFiatPrice','maxPurchasesPerDay','refreshSeconds','pagesPerCollection'];
+const fields=['minDiscountPct','minSales30d','minNetEdgePct','estimatedResaleFeesPct','minEstimatedProfitAud','minimumFiatPrice','maxPurchasesPerDay','refreshSeconds','pagesPerCollection'];
 function fillSettings(){const s=data.settings;
  fields.forEach(k=>$(k).value=s[k]);
  audFields.forEach(k=>{const val=data.audLimits?.[k];$(k).value=editableAud(val);$(k).placeholder=val===null||val===undefined?'Waiting for AUD quote':'AUD amount';});
@@ -344,7 +350,7 @@ document.querySelectorAll('.nav').forEach(b=>b.addEventListener('click',()=>view
 $('bannerGo').addEventListener('click',()=>{view('market');$('scanDiagnostics').scrollIntoView({behavior:'smooth',block:'center'});});
 $('engineButton').addEventListener('click',()=>view('settings'));
 $('refreshBtn').addEventListener('click',async()=>{try{await api('/api/refresh',{});toast('Market refresh started');}catch(e){toast(e.message,true);}});
-for(const [id,ev] of [['searchInput','input'],['collectionFilter','change'],['signalFilter','change'],['cheapestOnly','change']])$(id).addEventListener(ev,()=>{pageIndex=0;const before=selectedId;filterRows();renderDetail();if(before!==selectedId)void loadChart(true);});
+for(const [id,ev] of [['searchInput','input'],['collectionFilter','change'],['signalFilter','change'],['cheapestOnly','change'],['profitOnly','change']])$(id).addEventListener(ev,()=>{pageIndex=0;const before=selectedId;filterRows();renderDetail();if(before!==selectedId)void loadChart(true);});
  $('pagePrev').addEventListener('click',()=>{if(pageIndex>0){pageIndex--;filterRows();}});
  $('pageNext').addEventListener('click',()=>{pageIndex++;filterRows();});
 $('exportBtn').addEventListener('click',()=>{window.location.href='/api/export.csv';});
