@@ -65,8 +65,10 @@ test('Windows desktop packages the public rate reader and settings control',asyn
  const server=readFileSync(new URL('../server.mjs',import.meta.url),'utf8');
  assert.ok(pkg.build.files.includes('fiat.mjs'),'fiat module must ship in the Windows installer');
  assert.match(html,/id="minimumFiatPrice"/);
- assert.match(html,/id="fiatCurrency"/);
- assert.ok(ui.includes("fiatCurrency:$('fiatCurrency').value"));
+ for(const id of ['maximumPriceAud','dailyBudgetAud','minPriceAud'])assert.match(html,new RegExp('id="'+id+'"'));
+ assert.doesNotMatch(html,/id="fiatCurrency"/);
+ assert.ok(ui.includes("fiatCurrency:'AUD'"));
+ assert.match(server,/effectiveAudSettings\(state.settings,fiatRates\)/);
  assert.match(server,/displayRows=applyFiatMinimum\(/);
  assert.match(server,/fiatMinimumStatus\(state.settings,fiatRates\).available/);
 });
