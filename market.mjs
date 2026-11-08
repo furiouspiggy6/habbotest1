@@ -1,5 +1,7 @@
 import {COLLECTIONS,normalizeOrder,orderRejectionReason,hydrateNames} from './core.mjs';
 import {parseDirectBid} from './bid-market.mjs';
+import {createRequire} from 'node:module';
+const requireSdk=createRequire(import.meta.url);
 
 const chainName='imtbl-zkevm-mainnet';
 const API_BASE='https://api.immutable.com';
@@ -114,7 +116,7 @@ export function unpackPage(x){
 
 export async function makeClients(key){
  let pkg;
- try {pkg=await import('@imtbl/sdk');} catch (err) {
+ try {pkg=requireSdk('@imtbl/sdk');} catch (err) {
   throw new Error(`Trading SDK failed to load: ${String(err?.message??err).slice(0,230)}. This affects experimental live buying only; NFT market scanning uses the REST API.`);
  }
  const {config,orderbook,blockchainData}=pkg;
