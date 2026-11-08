@@ -93,3 +93,9 @@ The updater is Windows-specific. `npm install` runs during the update using your
 - Fixed Unix-second timestamps arriving as strings and pagination nested in SDK result envelopes. These previously could drop completed sales or limit scans to one page.
 - A publishable key from Immutable Hub may be required for live API access; without one API errors will be shown instead of fake prices.
 - Real-money trading is still experimental and OFF until deliberately enabled. Do not put private keys into GitHub.
+
+## Automatic GitHub updates (v1.0.6)
+
+**Automatic updates are ON by default** and configurable under Strategy & settings → Software updates. On Windows, the app checks the latest `furiouspiggy6/habbotest1` GitHub release after startup and about every six hours. If a newer version is published, it downloads the ZIP directly, checks the accompanying SHA-256 checksum, starts the existing staged Windows updater, closes and restarts itself. No manual ZIP download or install confirmation is needed when this option is on. Checks are deferred during market scans, when live buying is armed, or while another update is running. Failures are shown in the app and retried later; no silent fallback to demo trading occurs.
+
+**Existing installations:** v1.0.5 already has the **Check for updates → Install verified update & restart** buttons, so use them *once* to install v1.0.6. After that updates are automatic unless disabled in settings. The `data/` folder and `.env` wallet configuration remain local and unchanged. The updater does not enable real-money NFT buying. Auto-installing software from GitHub trusts the repository's published releases and is not a substitute for reviewing code.
