@@ -46,8 +46,8 @@ body.inspect-open{overflow:hidden}
 @media(max-width:690px){.listing-visibility{padding-left:14px;padding-right:14px}}
 /* v2.0.15: show actual listing and expiry times without compressing price columns. */
 .market-table{min-width:880px}
-.market-table th:nth-child(6),.market-table th:nth-child(7),
-.market-table td:nth-child(6),.market-table td:nth-child(7){font-size:10px;color:#a5b7c7}
+.market-table th:nth-child(8),.market-table th:nth-child(9),
+.market-table td:nth-child(8),.market-table td:nth-child(9){font-size:10px;color:#a5b7c7}
 
 /* v2.0.16: profit-range filtering and independently sourced Ethereum NFT watchlist. */
 .listing-visibility{justify-content:flex-start;gap:10px 22px}
