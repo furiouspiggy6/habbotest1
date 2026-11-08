@@ -14,9 +14,9 @@ function view(tab){currentTab=tab;for(const t of ['market','trades','settings'])
  document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
  if(tab==='trades')renderTrades();if(tab==='settings')renderReadiness();}
 function selectedRow(){return data?.rows?.find(r=>r.id===selectedId)??data?.rows?.[0]??null;}
-function renderBanner(){const isLive=data.settings.mode==='live';$('modeBadge').textContent=isLive?'● REAL MARKET DATA':'● DEMO MARKET';$('updatedText').textContent=relative(data.lastScan);
+function renderBanner(){const isLive=data.settings.mode==='live';const hasLiveOrders=Number(data.stats?.rawOrders)>0; $('modeBadge').textContent=isLive?(hasLiveOrders?'● LIVE ORDERS RECEIVED':'● LIVE SCAN NOT VERIFIED'):'● DEMO MARKET';$('updatedText').textContent=relative(data.lastScan);
  const b=$('banner');b.className='banner '+(isLive?'live-banner':'demo-banner');
- let title=isLive?'Real Immutable market data':'Demo trading environment';
+ let title=isLive?(hasLiveOrders?'Immutable market orders received':'Waiting for real NFT market data'):'Demo trading environment';
  let copy=isLive?'Live NFT listing data. Actual purchases remain OFF unless the live autobuyer is specifically armed.':'Sample prices only — no NFT transactions occur. Switch to Live Data under settings to scan actual listings.';
  if(isLive&&data.warnings.length){
   b.className='banner error-banner';title=data.stats.failedRequests?'Immutable API connection problems':'Live market scan warnings';
@@ -24,7 +24,7 @@ function renderBanner(){const isLive=data.settings.mode==='live';$('modeBadge').
  }
  $('bannerGo').textContent=isLive?'View scan details →':'Scan real NFTs →';
  b.querySelector('b').textContent=title;b.querySelector('span:not(.banner-icon)').textContent=copy;
- $('connectionPill').innerHTML='<span class="pulse-dot"></span> '+(data.scanning?'SCANNING':isLive?'LIVE DATA':'DEMO CONNECTED');}
+ $('connectionPill').innerHTML='<span class="pulse-dot"></span> '+(data.scanning?'SCANNING':isLive?(hasLiveOrders?'LIVE ORDERS':'NO LIVE ORDERS'):'DEMO CONNECTED');}
 function renderStats(){const rows=data.rows||[];$('statListings').textContent=rows.length;$('statOpportunities').textContent=rows.filter(x=>x.eligible).length;
  $('statSales').textContent=data.stats?.sales??0;$('statSpend').textContent=fmt(data.paperSpentToday,4);
  $('riskLimit').textContent=fmt(data.settings.maximumPriceEth,4)+' WETH';$('riskDiscount').textContent=data.settings.minDiscountPct+'%';
@@ -32,7 +32,7 @@ function renderStats(){const rows=data.rows||[];$('statListings').textContent=ro
  $('autobuyIndicator').style.color=canBuy?'#f87982':'#55e0bc';
  $('engineText').textContent=data.settings.mode==='demo'?'Paper trading only. Matching demo opportunities are logged automatically if enabled.':canBuy?'REAL MONEY purchasing is active. One eligible NFT at most per scan; it disarms on error or restart.':'Live market scanner is running. Real buying is OFF until separately enabled with a dedicated wallet and confirmation phrase.';
  $('coverageText').textContent=data.settings.mode==='demo'?'Demonstration data · invented NFT examples':`${data.stats.rawOrders??0} raw orders · ${data.stats.pages} pages · ${data.stats.failedRequests??0} failed requests · ${data.stats.truncated?'PARTIAL coverage':'page scan complete'} · ${data.warnings.length} warnings`;
- $('scanDiagnostics').textContent=data.settings.mode==='demo'?'This is demo data. Click Scan real NFTs above to load the Immutable market.':([`Immutable requests: ${data.stats.successfulRequests??0} successful / ${data.stats.failedRequests??0} failed. ${data.stats.rawOrders??0} raw orders received.`,...data.warnings].join('\n')); 
+ $('scanDiagnostics').textContent=data.settings.mode==='demo'?'This is demo data. Click Scan real NFTs above to load the Immutable market.':([`Immutable requests: ${data.stats.successfulRequests??0} successful / ${data.stats.failedRequests??0} failed. ${data.stats.rawOrders??0} raw orders received.`,...data.warnings,`Rejected orders: ${JSON.stringify(data.stats.rejected||{})}`, ...((data.stats.diagnostics||[]).map(d=>`${d.collection} ${d.status}: ${d.error||`${d.accepted}/${d.raw} accepted (${d.pages} pages)${d.shape?' shape='+JSON.stringify(d.shape):''}`}`))].join('\n')); 
 }
 function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),collection=$('collectionFilter').value,signal=$('signalFilter').value;
  const found=(data?.rows??[]).filter(x=>(!text||(`${x.name} ${x.tokenId} ${x.collection}`).toLowerCase().includes(text))&&(!collection||x.collection===collection)&&(signal!=='eligible'||x.eligible));
