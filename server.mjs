@@ -246,7 +246,9 @@ async function scan(forceDeep=false){if(scanning||updating)return;scanning=true;
   displayRows=sortByOpportunity(scored.map(row=>{
    const scorePassed=state.settings.minOpportunityScore<=0||
      (row.opportunityScore!==null&&row.opportunityScore>=state.settings.minOpportunityScore);
-   return {...row,scorePassed,eligible:row.eligible&&risk.available&&scorePassed,
+   const bestOfferPassed=row.observedCheaperOffers===0;
+   return {...row,scorePassed,bestOfferPassed,
+    eligible:row.eligible&&risk.available&&scorePassed&&bestOfferPassed,
     fiatMinPassed:row.fiatMinPassed&&risk.available};
   }));
   if(!risk.available){
