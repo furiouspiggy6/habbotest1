@@ -224,7 +224,7 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
     observedNearPriceOffers:row.observedNearPriceOffers??null,verifiedSales7d:row.verifiedSales7d??0,
     lastSaleAt:row.lastSaleAt??null,trendPct:row.trendPct??null,
     partialActiveCoverage:row.partialActiveCoverage===true,scoreCautions:row.scoreCautions??[],
-    buyOffersVerified:false,minProfitPassed:row.minProfitPassed!==false},
+    buyOffersVerified:false,bestOfferPassed:row.bestOfferPassed!==false,minProfitPassed:row.minProfitPassed!==false},
   lastScan,marketplaceUrl:marketplaceSearchUrl(row),
   estimate:{resaleFeePct,expectedProceedsEth:expectedProceeds===null?null:round(expectedProceeds,10),
    estimatedProfitEth:profit===null?null:round(profit,10),
@@ -240,7 +240,7 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
 }
 /** Explain why genuine listings are not actionable; first blocking gate per NFT. */
 export function candidateDiagnostics(rows,settings){
- const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,belowFiatMinimum:0,discountTooSmall:0,netEdgeTooSmall:0,belowEstimatedProfit:0,belowOpportunityScore:0,multiQuantity:0};
+ const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,belowFiatMinimum:0,discountTooSmall:0,netEdgeTooSmall:0,belowEstimatedProfit:0,belowOpportunityScore:0,cheaperComparableOffer:0,multiQuantity:0};
  for(const r of rows){
   if(r.eligible){counts.eligible++;continue;}
   if(!r.metadataResolved){counts.missingMetadata++;continue;}
@@ -251,6 +251,7 @@ export function candidateDiagnostics(rows,settings){
   if(!Number.isFinite(r.discount)||r.discount<settings.minDiscountPct){counts.discountTooSmall++;continue;}
   if(!Number.isFinite(r.netEdge)||r.netEdge<settings.minNetEdgePct){counts.netEdgeTooSmall++;continue;}
   if(r.minProfitPassed===false){counts.belowEstimatedProfit++;continue;}
+  if(r.bestOfferPassed===false){counts.cheaperComparableOffer++;continue;}
   if(r.scorePassed===false){counts.belowOpportunityScore++;continue;}
   // Never silently label a listing actionable if a future safety gate is added.
   counts.insufficientComparableSales++;
