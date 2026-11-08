@@ -2,8 +2,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing,fiatMinimumStatus,applyFiatMinimum,effectiveAudSettings,audLimitSummary} from './core.mjs';
-import {scanMarket} from './market.mjs';
+import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing,normalizeOrder,fiatMinimumStatus,applyFiatMinimum,effectiveAudSettings,audLimitSummary} from './core.mjs';
+import {scanMarket,createReadClients} from './market.mjs';
 import {fetchFiatRates} from './fiat.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
 import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
@@ -27,6 +27,33 @@ let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
 let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
 let liveArmed=false,liveBuyInFlight=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
 let fiatRates=null,fiatRateError='',nextFiatCheckAt=0;
+const orderVerificationCache=new Map();
+async function verifyReadOnlyOrder(row){
+ const now=Date.now(),cached=orderVerificationCache.get(row.id);
+ if(cached&&now-cached.checkedAt<45_000)return cached;
+ let result={status:'unverified',checkedAt:now,message:'Immutable has not confirmed this individual order.'};
+ try{
+  const client=createReadClients(state.settings.publishableKey);
+  const response=await client.orderbook.getListing(row.id);
+  const raw=response?.result?.result??response?.result??response;
+  const current=normalizeOrder(raw,{name:row.collection,address:row.contract},'ACTIVE');
+  if(current&&String(current.id)===String(row.id)&&current.tokenId===row.tokenId){
+   result={status:'confirmed',checkedAt:now,priceEth:current.price,
+    totalCostEth:current.totalWithFeesEth,
+    listedAt:current.listedAt,expiresAt:current.expiresAt,
+    priceChanged:Math.abs(current.price-row.price)>1e-9,
+    feesChanged:Math.abs(current.totalWithFeesEth-row.totalWithFeesEth)>1e-9,
+    message:'Individual order rechecked through Immutable; TokenTrove may use a different order or FX rate.'};
+  }else result={status:'unverified',checkedAt:now,
+   message:'Immutable returned an order that could not be matched to this exact active NFT listing; do not assume the cached price is executable.'};
+ }catch(err){
+  result={status:'unverified',checkedAt:now,
+   message:'Individual order verification unavailable: '+String(err?.message??err).slice(0,160)};
+ }
+ if(orderVerificationCache.size>=250)orderVerificationCache.clear();
+ orderVerificationCache.set(row.id,result);
+ return result;
+}
 async function refreshFiatRates(){
  if(Date.now()<nextFiatCheckAt)return;
  nextFiatCheckAt=Date.now()+5*60*1000; // one public price request every five minutes
@@ -269,7 +296,12 @@ const server=http.createServer(async(req,res)=>{
    if(!id||id.length>250)return send(res,400,{error:'A valid live order ID is required.'});
    const listing=displayRows.find(row=>row.id===id);
    if(!listing)return send(res,404,{error:'This listing is no longer in the most recent live scan. Refresh and inspect again.'});
-   return send(res,200,inspectListing(listing,state.historicalSales,state.settings,scannedAt));
+   const details=inspectListing(listing,state.historicalSales,state.settings,scannedAt);
+   const audit=await verifyReadOnlyOrder(listing);
+   const rate=fiatMinimumStatus({...state.settings,fiatCurrency:'AUD'},fiatRates);
+   return send(res,200,{...details,priceAudit:audit,
+    audRate:{available:rate.available,spot:rate.spot,fetchedAt:rate.fetchedAt,source:fiatRates?.source||'CoinGecko ETH spot'},
+    coveragePartial:stats.truncated>0});
   }
   if(req.method==='GET'&&uri.pathname==='/api/update/check'){
    if(process.env.HABBO_DESKTOP_APP==='1')return send(res,410,{error:'Use the desktop software update button instead.'});
