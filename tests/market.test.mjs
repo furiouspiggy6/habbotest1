@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {COLLECTIONS,WETH} from '../core.mjs';
-import {collectPage,resolveMetadata} from '../market.mjs';
+import {collectPage,resolveMetadata,unpackPage} from '../market.mjs';
 const col=COLLECTIONS[0];
 function order(id,status='ACTIVE',tokenId='12') {return {id,buy:[{item_type:'ERC20',contract_address:WETH,start_amount:'1000000000000000'}],sell:[{item_type:'ERC721',contract_address:col.address,token_id:tokenId,start_amount:'1'}],status:{name:status},created_at:'2026-11-07T09:00:00Z',updated_at:'2026-11-07T12:00:00Z'};}
 test('orderbook pagination, deduplication and coverage flag',async()=>{
@@ -19,4 +19,16 @@ test('metadata is only marked verified after a resolved name',async()=>{
  const client={getNFT:async ({tokenId})=>tokenId==='1'?{result:{metadata:{name:'Golden Dragon',image:'https://example.org/img.png'},metadata_id:'meta-1'}}:{result:{metadata:{description:'no name'}}}};
  const result=await resolveMetadata(client,orders,{},2);
  assert.equal(result.ok,1);assert.equal(result.remaining,1);assert.equal(result.cache[`${col.address}|1`].name,'Golden Dragon');
+});
+
+test('Immutable nested response preserves pagination',()=>{
+ const r=unpackPage({result:{result:[order('abc')],page:{next_cursor:'next-one'}}});
+ assert.equal(r.data.length,1);assert.equal(r.next,'next-one');
+});
+test('reject reports distinguish incompatible currencies',async()=>{
+ const raw=order('a');raw.buy[0].contract_address='0x123';
+ const out=await collectPage({listListings:async()=>({result:[raw],page:{}})},col,'ACTIVE',1);
+ assert.equal(out.received,1);assert.equal(out.orders.length,0);
+ assert.equal(out.rejections['not WETH priced'],1);
+ assert.equal(out.sampleShape.status,'ACTIVE');
 });
