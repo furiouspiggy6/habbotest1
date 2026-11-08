@@ -210,7 +210,6 @@ const server=http.createServer(async(req,res)=>{
   if(uri.pathname==='/api/update/install'){
    if(process.platform!=='win32')return send(res,400,{error:'Update installation is currently Windows-only.'});
    if(liveArmed)return send(res,409,{error:'Disarm real-money autobuying before updating.'});
-   if(scanning)return send(res,409,{error:'A market scan is running; retry once the scan finishes.'});
    if(updating)return send(res,409,{error:'Update already in progress.'});
    if(body.confirm!=='INSTALL VERIFIED UPDATE')return send(res,400,{error:'Explicit update confirmation is required.'});
    updating=true;
@@ -219,7 +218,8 @@ const server=http.createServer(async(req,res)=>{
     const candidate=await checkForUpdates();
     if(!candidate.available)throw Error('No newer published release found.');
     if(lastCheckedUpdate?.latest!==candidate.latest)throw Error('Release changed since your last check. Check updates again first.');
-    // User pressed Install: finish an active scan first; updating=true stops new ones.
+    // Queue the manual installation; updating=true blocks NEW scans while the current one completes.
+    markUpdate('waiting',scanning?'Update queued: waiting for the current NFT scan to finish.':'Update queued: preparing installation.',{availableVersion:candidate.latest});
     await waitForScanToFinish();
     const result=await installCandidate(candidate);
     return send(res,200,result);
