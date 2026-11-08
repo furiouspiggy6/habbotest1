@@ -91,7 +91,9 @@ function renderReadiness(){if(!data)return;const checks=[['Live market connected
 function collectSettings(){const old=data.settings;return {...old,mode:'live',
   ...Object.fromEntries(fields.map(k=>[k,Number($(k).value)])),publishableKey:$('publishableKey').value,
   collections:old.collections.map(c=>({...c,enabled:document.querySelector(`[data-contract="${c.address}"]`)?.checked??false}))};}
-async function sync(){try{const incoming=await api('/api/state');data=incoming;
+async function sync(){try{const incoming=await api('/api/state');
+ if(data?.appVersion&&incoming.appVersion!==data.appVersion){window.location.reload();return;}
+ data=incoming;
  if($('appVersion'))$('appVersion').textContent='v'+data.appVersion;
  if($('updaterVersion'))$('updaterVersion').textContent='v'+data.appVersion;
  if($('autoInstallUpdates'))$('autoInstallUpdates').checked=data.updatePrefs?.autoInstall??true;
@@ -100,7 +102,7 @@ async function sync(){try{const incoming=await api('/api/state');data=incoming;
  renderMarket();if(currentTab==='trades')renderTrades();if(currentTab==='settings')renderReadiness();
  if(!settingsLoaded){fillSettings();settingsLoaded=true;}
  if(currentTab==='market')void loadChart();
- }catch(e){$('connectionPill').textContent='OFFLINE';if(!data)toast('Cannot contact the local server: '+e.message,true);}}
+ }catch(e){$('connectionPill').textContent='RECONNECTING AFTER UPDATE…';if(!data)toast('Cannot contact the local server: '+e.message,true);}}
 document.querySelectorAll('.nav').forEach(b=>b.addEventListener('click',()=>view(b.dataset.tab)));
 $('bannerGo').addEventListener('click',()=>view('trades'));
 $('engineButton').addEventListener('click',()=>view('settings'));
