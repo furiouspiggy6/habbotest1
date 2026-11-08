@@ -253,12 +253,12 @@ function send(res,status,data,contentType='application/json; charset=utf-8'){
 }
 const PORT=Number(process.env.PORT||38571);
 function jsonBody(req){return new Promise((resolve,reject)=>{let b='';req.on('data',s=>{b+=s;if(b.length>250000){reject(new Error('Request too large'));req.destroy();}});req.on('end',()=>{try{resolve(JSON.parse(b||'{}'));}catch{reject(new Error('Invalid JSON'));}});req.on('error',reject);});}
-const assets=new Map([['/','public/index.html'],['/app.js','public/app.js'],['/style.css','public/style.css']]);
+const assets=new Map([['/','public/index.html'],['/app.js','public/app.js'],['/listing-views.mjs','public/listing-views.mjs'],['/style.css','public/style.css']]);
 const server=http.createServer(async(req,res)=>{
  try{
   const uri=new URL(req.url,`http://127.0.0.1:${PORT}`);
   if(req.method==='GET'&&assets.has(uri.pathname)){
-   const file=path.join(HERE,assets.get(uri.pathname));return send(res,200,fs.readFileSync(file,'utf8'),uri.pathname.endsWith('.js')?'text/javascript; charset=utf-8':uri.pathname.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');
+   const file=path.join(HERE,assets.get(uri.pathname));return send(res,200,fs.readFileSync(file,'utf8'),(uri.pathname.endsWith('.js')||uri.pathname.endsWith('.mjs'))?'text/javascript; charset=utf-8':uri.pathname.endsWith('.css')?'text/css; charset=utf-8':'text/html; charset=utf-8');
   }
   if(req.method==='GET'&&uri.pathname==='/api/state')return send(res,200,safeSummary());
   // Fetch the complete real order set on demand, rather than truncating at 800
