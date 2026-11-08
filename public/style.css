@@ -49,3 +49,13 @@ body.inspect-open{overflow:hidden}
 .market-table th:nth-child(6),.market-table th:nth-child(7),
 .market-table td:nth-child(6),.market-table td:nth-child(7){font-size:10px;color:#a5b7c7}
 
+/* v2.0.16: profit-range filtering and independently sourced Ethereum NFT watchlist. */
+.listing-visibility{justify-content:flex-start;gap:10px 22px}
+.open-sea-panel{margin-top:18px;padding-bottom:10px}
+.open-sea-panel .panel-heading{margin-bottom:8px}
+.source-desc{font-size:11px;color:#8fa6b7;padding:5px 22px;line-height:1.6}
+.external-table{min-width:780px}
+.external-table td:first-child{font-weight:650}
+.external-table td a{font-size:11px}
+#openSeaStatus{white-space:nowrap}
+#clearOpenSeaKey{accent-color:var(--mint);width:16px;height:16px}
