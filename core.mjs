@@ -125,8 +125,9 @@ export function effectiveAudSettings(settings,quote,now=Date.now()){
  const enabled=audRateRequired(settings);
  if(!q.available)return {settings:{...settings},available:!enabled,spot:null,required:enabled};
  const convert=(k,old)=>settings[k]===null||settings[k]===undefined?settings[old]:settings[k]/q.spot;
- return {settings:{...settings,maximumPriceEth:convert('maximumPriceAud','maximumPriceEth'),
-  dailyBudgetEth:convert('dailyBudgetAud','dailyBudgetEth'),
+ // Preserve the original absolute WETH safety caps even when AUD limits are high.
+ return {settings:{...settings,maximumPriceEth:Math.min(2,convert('maximumPriceAud','maximumPriceEth')),
+  dailyBudgetEth:Math.min(5,convert('dailyBudgetAud','dailyBudgetEth')),
   minPriceEth:convert('minPriceAud','minPriceEth')},
   available:true,spot:q.spot,required:enabled};
 }
