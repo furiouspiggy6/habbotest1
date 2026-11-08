@@ -121,6 +121,7 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
   (signal==='all'||(signal==='eligible'?x.eligible:withinAudRange(x)))&&
   (!$('profitOnly').checked||minimumProfit<=0||
    (Number.isFinite(Number(x.estimatedProfitAud))&&x.estimatedProfitAud!==null&&x.estimatedProfitAud!==undefined&&x.estimatedProfitAud+1e-8>=minimumProfit)));
+ if($('profitOnly').checked&&minimumProfit>0)matched.sort((a,b)=>(b.estimatedProfitAud??-Infinity)-(a.estimatedProfitAud??-Infinity));
  const grouped=$('cheapestOnly').checked;
  const found=grouped?cheapestPerCollectible(matched):matched;
  visibleRows=found;
