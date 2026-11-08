@@ -62,3 +62,19 @@ test('Windows updater must verify the replacement process is online and preserve
  assert.match(recovery,/Verified Market Radar/);
  assert.match(recovery,/node\.exe/);
 });
+
+test('manual update requests queue behind the active scan instead of returning HTTP 409',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const {fileURLToPath}=await import('node:url');
+ const {resolve,dirname}=await import('node:path');
+ const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+ const server=readFileSync(resolve(root,'server.mjs'),'utf8');
+ const manualRoute=server.split("if(uri.pathname==='/api/update/install'){")[1]?.split("if(uri.pathname==='/api/settings'){")[0];
+ assert.ok(manualRoute,'manual update route exists');
+ assert.doesNotMatch(manualRoute,/if\(scanning\)return send\(res,409/);
+ assert.match(manualRoute,/updating=true;/);
+ assert.match(manualRoute,/await waitForScanToFinish\(\);/);
+ assert.match(manualRoute,/await installCandidate\(candidate\);/);
+ const frontend=readFileSync(resolve(root,'public/app.js'),'utf8');
+ assert.match(frontend,/Update queued\. Waiting for any active NFT scan/);
+});
