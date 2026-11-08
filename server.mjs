@@ -2,6 +2,8 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {createRequire} from 'node:module';
+const requireTradingSdk=createRequire(import.meta.url);
 import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing,normalizeOrder,fiatMinimumStatus,applyFiatMinimum,effectiveAudSettings,audLimitSummary} from './core.mjs';
 import {scanMarket,createReadClients} from './market.mjs';
 import {scoreOpportunityRows,sortByOpportunity,applyConservativeResale} from './opportunity.mjs';
@@ -504,7 +506,8 @@ const server=http.createServer(async(req,res)=>{
    // Fail before arming if packaged trading dependencies cannot be loaded.
    // Missing SDK was previously discovered only after a real purchase attempt.
    try{
-    const [sdk,ethers]=await Promise.all([import('@imtbl/sdk'),import('ethers')]);
+    const sdk=requireTradingSdk('@imtbl/sdk');
+    const ethers=await import('ethers');
     if(typeof sdk.orderbook?.Orderbook!=='function'||typeof ethers.Wallet!=='function')
      return send(res,503,{error:'The installed SDK does not expose required trading interfaces. Buying is disabled.'});
    }catch{return send(res,503,{error:'Trading dependencies unavailable in this installation. Buying remains disarmed.'});}
