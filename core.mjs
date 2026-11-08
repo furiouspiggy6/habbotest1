@@ -68,13 +68,18 @@ export function normalizeOrder(input,collection,status='ACTIVE'){
  if(!Number.isFinite(fees)||fees<0)return null;
  const date=status==='FILLED'?(raw.updated_at??raw.update_time??raw.updatedAt??raw.created_at??raw.create_time):(raw.created_at??raw.create_time??raw.createdAt);
  const when=safeTime(date);
+ // Immutable orderbook's creation and expiration fields are independent.
+ // Never use scan time as an invented original listing timestamp.
+ const listedAt=safeTime(raw.created_at??raw.create_time??raw.createdAt)||null;
+ const startsAt=safeTime(raw.start_at??raw.start_time??raw.startAt??raw.startTime)||null;
+ const expiresAt=safeTime(raw.end_at??raw.end_time??raw.endAt??raw.endTime??raw.protocol_data?.end_time)||null;
  // Missing actual sale timestamp should not count as historical evidence.
  if(status==='FILLED'&&!when)return null;
  const unitPrice=total/quantity;
  return {id:String(raw.id),contract,collection:collection.name,tokenId,key:`${contract}|token:${tokenId}`,
    name:`${collection.name} #${tokenId}`,price:round(unitPrice,10),totalPrice:round(total,10),quantity,
    feeEstimateEth:round(fees,10),totalWithFeesEth:round(total+fees,10),currency:'WETH',status,
-   timestamp:when||(status==='ACTIVE'?Date.now():0),href:`https://tokentrove.com/collection/Habbo`,
+   listedAt,startsAt,expiresAt,timestamp:when||(status==='ACTIVE'?Date.now():0),href:`https://tokentrove.com/collection/Habbo`,
    metadataResolved:false,tokenType:String(sell.item_type??sell.type).toUpperCase()};
 }
 export function hydrateNames(orders,metadata={}){
@@ -182,6 +187,8 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
    contract:row.contract,tokenId:String(row.tokenId),quantity,tokenType:row.tokenType,
    price:row.price,feeEstimateEth:row.feeEstimateEth,totalWithFeesEth:row.totalWithFeesEth,
    reference:row.reference,discount:row.discount,netEdge:row.netEdge,sales30d:row.sales30d,
+   listedAt:row.listedAt??null,startsAt:row.startsAt??null,expiresAt:row.expiresAt??null,
+   floor:row.floor??null,
    eligible:row.eligible===true,metadataResolved:row.metadataResolved===true,image:row.image||'',
     estimatedFiatCost:row.estimatedFiatCost??null,fiatMinPassed:row.fiatMinPassed!==false},
   lastScan,marketplaceUrl:marketplaceSearchUrl(row),
