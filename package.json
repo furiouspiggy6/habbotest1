@@ -1,6 +1,6 @@
 {
   "name": "habbo-nft-market-radar",
-  "version": "2.0.9",
+  "version": "2.0.10",
   "private": true,
   "type": "module",
   "description": "Windows desktop Habbo NFT scanner with live Immutable data and native automatic updates",
@@ -34,6 +34,7 @@
       "desktop/**/*",
       "core.mjs",
       "market.mjs",
+      "fiat.mjs",
       "trade.mjs",
       "server.mjs",
       "updates.mjs",
