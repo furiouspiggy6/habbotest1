@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {analyze,candles,DEFAULT_SETTINGS,validateSettings} from './core.mjs';
+import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics} from './core.mjs';
 import {scanMarket} from './market.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
 import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
@@ -25,7 +25,7 @@ let updating=false;
 let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
 let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
 let liveArmed=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
-let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[]};
+let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[],coverage:null,candidateDiagnostics:null};
 function save(){const output={schemaVersion:7,settings:state.settings,updatePrefs:state.updatePrefs,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
  const tmp=storePath+'.tmp';fs.writeFileSync(tmp,JSON.stringify(output,null,2));fs.renameSync(tmp,storePath);}
 function event(kind,message){state.events.unshift({kind,message,time:Date.now()});state.events=state.events.slice(0,400);console.log(`[${kind}] ${message}`);}
@@ -72,19 +72,25 @@ async function scan(){if(scanning||updating)return;scanning=true;
   const r=await scanMarket(state.settings,state.metadata);
   const {listings,filled}=r;
   warnings=r.warnings;
-  stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics};
+  stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics,coverage:r.coverage,candidateDiagnostics:null};
   if(r.truncated)warnings.unshift('PARTIAL COVERAGE: not every listing or past sale was downloaded; signals are based on a limited sample of REAL trades.');
-  const seen=new Set(state.historicalSales.map(s=>s.id));
-  for(const sale of filled)if(!seen.has(sale.id)){state.historicalSales.push(sale);seen.add(sale.id);}
+  // Refresh historical records as metadata arrives. Earlier versions persisted
+  // unresolved FILLED orders permanently, even when subsequent scans found identity.
+  const salesById=new Map(state.historicalSales.map(s=>[s.id,s]));
+  for(const sale of filled){
+   const prior=salesById.get(sale.id);
+   if(!prior||(!prior.metadataResolved&&sale.metadataResolved))salesById.set(sale.id,sale);
+  }
   const threshold=Date.now()-93*86400000;
-  state.historicalSales=state.historicalSales.filter(x=>x.timestamp>=threshold).slice(-16000);
+  state.historicalSales=hydrateNames([...salesById.values()],state.metadata).filter(x=>x.timestamp>=threshold).slice(-16000);
   chartSales=state.historicalSales;
   activeListings=listings;
   displayRows=analyze(listings,chartSales,state.settings);
+  stats.candidateDiagnostics=candidateDiagnostics(displayRows,state.settings);
   scannedAt=Date.now();
   if(stats.sales===0)warnings.push('No completed sale records in this response; trades require credible local sales history.');
   await doAutoTrades();save();event('scan',`LIVE: ${listings.length} real listings, ${filled.length} completed orders, ${displayRows.filter(x=>x.eligible).length} candidates.`);
- }catch(e){liveArmed=false;displayRows=[];activeListings=[];scannedAt=0;stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:1,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[]};warnings=[`Live scan failed: ${String(e?.message??e)}`];event('error',warnings[0]);}
+ }catch(e){liveArmed=false;displayRows=[];activeListings=[];scannedAt=0;stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:1,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[],coverage:null,candidateDiagnostics:null};warnings=[`Live scan failed: ${String(e?.message??e)}`];event('error',warnings[0]);}
  finally{scanning=false;}
 }
 function schedule(){if(serverTimer)clearInterval(serverTimer);serverTimer=setInterval(()=>{scan().catch(e=>event('error',String(e)));},state.settings.refreshSeconds*1000);}
