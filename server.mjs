@@ -5,7 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing,normalizeOrder,fiatMinimumStatus,applyFiatMinimum,effectiveAudSettings,audLimitSummary} from './core.mjs';
 import {scanMarket,createReadClients} from './market.mjs';
 import {fetchFiatRates} from './fiat.mjs';
-import {fetchOpenSeaAvatarListings} from './opensea.mjs';
+import {fetchOpenSeaAvatarListings,summarizeOpenSeaConnection} from './opensea.mjs';
 import {parseStackFloor} from './market-floor.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
 import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
@@ -31,17 +31,33 @@ let liveArmed=false,liveBuyInFlight=false,scanning=false,serverTimer=null,active
 let fiatRates=null,fiatRateError='',nextFiatCheckAt=0;
 let openSeaFeed={status:'needs-key',rows:[],pages:0,truncated:false,error:'Set an OpenSea API key to enable separate Ethereum NFT listings.',checkedAt:0};
 let openSeaInProgress=false,nextOpenSeaCheckAt=0;
+let openSeaConnection={status:'unchecked',checkedAt:0,message:'Waiting for the first OpenSea connection check.'};
+let openSeaTestInProgress=false,lastOpenSeaTestAt=0;
+function recordOpenSeaConnection(result){
+ const summary=summarizeOpenSeaConnection(result);
+ if(summary.checkedAt>=openSeaConnection.checkedAt)openSeaConnection=summary;
+}
 async function refreshOpenSea(){
  if(openSeaInProgress||Date.now()<nextOpenSeaCheckAt)return;
  const key=state.settings.openSeaApiKey;
  if(!key){
   openSeaFeed={status:'needs-key',rows:[],pages:0,truncated:false,error:'Set an OpenSea API key in Settings to enable official Ethereum Habbo Avatar listings.',checkedAt:Date.now()};
+  recordOpenSeaConnection(openSeaFeed);
   nextOpenSeaCheckAt=Date.now()+10*60*1000;return;
  }
  openSeaInProgress=true;nextOpenSeaCheckAt=Date.now()+10*60*1000;
- try{openSeaFeed=await fetchOpenSeaAvatarListings(key);}
- catch(err){openSeaFeed={status:'error',rows:[],pages:0,truncated:false,error:'OpenSea scan failed: '+String(err?.message??err).slice(0,120),checkedAt:Date.now()};}
- finally{openSeaInProgress=false;}
+ try{
+  const result=await fetchOpenSeaAvatarListings(key);
+  if(key===state.settings.openSeaApiKey){openSeaFeed=result;recordOpenSeaConnection(result);}
+ }catch{
+  if(key===state.settings.openSeaApiKey){
+   openSeaFeed={status:'error',rows:[],pages:0,truncated:false,error:'OpenSea connection failed. Check internet access or API availability.',checkedAt:Date.now()};
+   recordOpenSeaConnection(openSeaFeed);
+  }
+ }finally{
+  openSeaInProgress=false;
+  if(key!==state.settings.openSeaApiKey){nextOpenSeaCheckAt=0;void refreshOpenSea();}
+ }
 }
 const orderVerificationCache=new Map();
 const stackFloorCache=new Map();
@@ -135,6 +151,7 @@ function safeSummary(){return {
  appVersion:LOCAL_VERSION,installDirectory:HERE,updateRepository:GITHUB_REPO,updatePrefs:state.updatePrefs,updateStatus,
  settings:{...state.settings,openSeaApiKey:''},
  openSeaKeyConfigured:Boolean(state.settings.openSeaApiKey),
+ openSeaConnection:{...openSeaConnection,loading:openSeaInProgress||openSeaTestInProgress},
  openSea:{status:openSeaFeed.status,count:openSeaFeed.rows.length,checkedAt:openSeaFeed.checkedAt??0,
   pages:openSeaFeed.pages,truncated:openSeaFeed.truncated,error:openSeaFeed.error||'',loading:openSeaInProgress},
  scanning,lastScan:scannedAt,now:Date.now(),armed:liveArmed,
@@ -364,7 +381,7 @@ const server=http.createServer(async(req,res)=>{
    const csv=header+displayRows.map(row=>[row.collection,row.name,row.tokenId,aud(row.price),aud(row.reference),aud(row.totalWithFeesEth),row.estimatedProfitAud===null||row.estimatedProfitAud===undefined?'':Number(row.estimatedProfitAud).toFixed(4),row.discount,row.netEdge,row.sales30d,row.eligible,row.id,rate.available?rate.spot:'',rate.available?new Date(rate.fetchedAt).toISOString():''].map(quote).join(',')).join('\n');
    return send(res,200,csv,'text/csv; charset=utf-8');
   }
-  if(req.method!=='POST'||!['/api/settings','/api/refresh','/api/arm','/api/disarm','/api/update/install','/api/update/preferences'].includes(uri.pathname))return send(res,404,{error:'Not found'});
+  if(req.method!=='POST'||!['/api/settings','/api/refresh','/api/opensea/test','/api/arm','/api/disarm','/api/update/install','/api/update/preferences'].includes(uri.pathname))return send(res,404,{error:'Not found'});
   // Local-only API; prevent another browser tab/site from posting by cross-site fetch/forms.
   const origin=req.headers.origin;if(origin&&origin!==`http://127.0.0.1:${PORT}`&&origin!==`http://localhost:${PORT}`)return send(res,403,{error:'Invalid origin'});
   if(req.headers['content-type']?.split(';')[0]!=='application/json')return send(res,415,{error:'Use application/json'});
@@ -395,7 +412,26 @@ const server=http.createServer(async(req,res)=>{
     return send(res,200,result);
    } catch(err) {updating=false;markUpdate('error',`Update failed: ${String(err?.message??err)}`);return send(res,400,{error:String(err.message||err)});}
   }
-  if(uri.pathname==='/api/settings'){
+  if(uri.pathname==='/api/opensea/test'){
+    if(updating)return send(res,409,{error:'Update installation is in progress.'});
+    const key=state.settings.openSeaApiKey;
+    if(!key)return send(res,409,{error:'Save an OpenSea API key first, then test the saved key.'});
+    if(openSeaTestInProgress)return send(res,409,{error:'OpenSea connection test is already running.'});
+    if(Date.now()-lastOpenSeaTestAt<5000)return send(res,429,{error:'Please allow five seconds between connection tests.'});
+    lastOpenSeaTestAt=Date.now();openSeaTestInProgress=true;
+    try{
+     const result=await fetchOpenSeaAvatarListings(key,{maxPages:1});
+     const summary=summarizeOpenSeaConnection(result);
+     if(key===state.settings.openSeaApiKey)recordOpenSeaConnection(result);
+     return send(res,200,key===state.settings.openSeaApiKey?summary:
+      {status:'unchecked',checkedAt:Date.now(),message:'The API key changed during the test. Please test the new saved key.'});
+    }catch{
+     const result={status:'error',checkedAt:Date.now(),message:'Could not reach OpenSea to verify the key.'};
+     if(key===state.settings.openSeaApiKey)openSeaConnection=result;
+     return send(res,200,result);
+    }finally{openSeaTestInProgress=false;}
+   }
+   if(uri.pathname==='/api/settings'){
    if(updating)return send(res,409,{error:'Update installation is in progress.'});
    const updated=validateSettings({
     ...body,
@@ -406,7 +442,12 @@ const server=http.createServer(async(req,res)=>{
        ['maximumPriceAud','dailyBudgetAud','minPriceAud','minEstimatedProfitAud'].some(k=>state.settings[k]!==updated[k]))liveArmed=false;
    const keyChanged=state.settings.openSeaApiKey!==updated.openSeaApiKey;
    state.settings=updated;save();schedule();event('system','Live market settings saved');
-   if(keyChanged){nextOpenSeaCheckAt=0;openSeaFeed={status:'checking',rows:[],pages:0,truncated:false,checkedAt:0,error:''};void refreshOpenSea();}
+   if(keyChanged){
+     nextOpenSeaCheckAt=0;
+     openSeaConnection={status:updated.openSeaApiKey?'checking':'needs-key',checkedAt:0,message:updated.openSeaApiKey?'Verifying the newly saved OpenSea key…':'No OpenSea API key has been saved.'};
+     openSeaFeed={status:'checking',rows:[],pages:0,truncated:false,checkedAt:0,error:''};
+     void refreshOpenSea();
+    }
    void scan();return send(res,200,{ok:true});
   }
   if(uri.pathname==='/api/refresh'){void scan();return send(res,200,{ok:true});}
