@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing,normalizeOrder,fiatMinimumStatus,applyFiatMinimum,effectiveAudSettings,audLimitSummary} from './core.mjs';
 import {scanMarket,createReadClients} from './market.mjs';
+import {scoreOpportunityRows,sortByOpportunity} from './opportunity.mjs';
 import {fetchFiatRates} from './fiat.mjs';
 import {fetchOpenSeaAvatarListings,summarizeOpenSeaConnection} from './opensea.mjs';
 import {parseStackFloor} from './market-floor.mjs';
@@ -29,6 +30,7 @@ let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
 let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
 let liveArmed=false,liveBuyInFlight=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
 let fiatRates=null,fiatRateError='',nextFiatCheckAt=0;
+let nextDeepScanAt=0,lastDeepScanAt=0,scanMode='regular',scanPages=0;
 let openSeaFeed={status:'needs-key',rows:[],pages:0,truncated:false,error:'Set an OpenSea API key to enable separate Ethereum NFT listings.',checkedAt:0};
 let openSeaInProgress=false,nextOpenSeaCheckAt=0;
 let openSeaConnection={status:'unchecked',checkedAt:0,message:'Waiting for the first OpenSea connection check.'};
@@ -150,6 +152,8 @@ function dayCount(trades){const d=today(Date.now());return trades.filter(t=>toda
 function safeSummary(){return {
  appVersion:LOCAL_VERSION,installDirectory:HERE,updateRepository:GITHUB_REPO,updatePrefs:state.updatePrefs,updateStatus,
  settings:{...state.settings,openSeaApiKey:''},
+ deepScan:{enabled:state.settings.deepScanEnabled===true,nextAt:nextDeepScanAt||null,
+  lastAt:lastDeepScanAt||null,lastMode:scanMode,scanPages},
  openSeaKeyConfigured:Boolean(state.settings.openSeaApiKey),
  openSeaConnection:{...openSeaConnection,loading:openSeaInProgress||openSeaTestInProgress},
  openSea:{status:openSeaFeed.status,count:openSeaFeed.rows.length,checkedAt:openSeaFeed.checkedAt??0,
@@ -200,15 +204,26 @@ async function doAutoTrades(){
   }finally{liveBuyInFlight=false;save();}
  }
 }
-async function scan(){if(scanning||updating)return;scanning=true;
+async function scan(forceDeep=false){if(scanning||updating)return;scanning=true;
+ const now=Date.now();
+ const interval=Number(state.settings.deepScanIntervalMinutes??30)*60_000;
+ let deep=forceDeep===true;
+ if(state.settings.deepScanEnabled){
+  if(!nextDeepScanAt)nextDeepScanAt=now+interval;
+  if(now>=nextDeepScanAt)deep=true;
+  if(deep)nextDeepScanAt=now+interval;
+ }else nextDeepScanAt=0;
+ const requestedPages=deep?Math.max(state.settings.pagesPerCollection,state.settings.deepScanPages):state.settings.pagesPerCollection;
  try {
   // A failed spot-price lookup must NOT discard real Immutable NFT listings.
   // Instead, the dollar floor fails closed and no new live buys qualify.
   await refreshFiatRates();
   void refreshOpenSea(); // separate read-only feed; never blocks Immutable scanner
-  const r=await scanMarket(state.settings,state.metadata,state.scanProgress,undefined,state.historicalSales);
+  const r=await scanMarket({...state.settings,pagesPerCollection:requestedPages},state.metadata,state.scanProgress,undefined,state.historicalSales);
   const {listings,filled}=r;
   warnings=r.warnings;
+  scanMode=deep?'deep':'regular';scanPages=requestedPages;
+  if(deep)lastDeepScanAt=Date.now();
   stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics,coverage:r.coverage,candidateDiagnostics:null,historyPending:r.historyPending,historyCompleted:r.historyCompleted};
   if(r.truncated)warnings.unshift('PARTIAL ACTIVE COVERAGE: at least one collection has more live offers than were retrieved. The page limit or a failed request interrupted its scan; see collection details.');
   // Refresh historical records as metadata arrives. Earlier versions persisted
@@ -225,10 +240,15 @@ async function scan(){if(scanning||updating)return;scanning=true;
   // A deep market scan can outlive the FX quote TTL.
   await refreshFiatRates();
   const risk=effectiveAudSettings(state.settings,fiatRates);
-  displayRows=applyFiatMinimum(analyze(listings,chartSales,risk.settings),state.settings,fiatRates)
-    .map(row=>({...row,eligible:row.eligible&&risk.available,
-       fiatMinPassed:row.fiatMinPassed&&risk.available}))
-    .sort((a,b)=>Number(b.eligible)-Number(a.eligible)||(b.discount??-1000)-(a.discount??-1000));
+  const partialCollections=r.diagnostics.filter(d=>d.status==='ACTIVE'&&(d.hasMore||d.error)).map(d=>d.collection);
+  const priced=applyFiatMinimum(analyze(listings,chartSales,risk.settings),state.settings,fiatRates);
+  const scored=scoreOpportunityRows(priced,chartSales,{partialCollections});
+  displayRows=sortByOpportunity(scored.map(row=>{
+   const scorePassed=state.settings.minOpportunityScore<=0||
+     (row.opportunityScore!==null&&row.opportunityScore>=state.settings.minOpportunityScore);
+   return {...row,scorePassed,eligible:row.eligible&&risk.available&&scorePassed,
+    fiatMinPassed:row.fiatMinPassed&&risk.available};
+  }));
   if(!risk.available){
    warnings.unshift('Live AUD quote unavailable or older than 15 minutes: dollar-denominated signals and purchases are BLOCKED until the rate is refreshed.'+(fiatRateError?' '+fiatRateError:''));
   }
@@ -381,7 +401,7 @@ const server=http.createServer(async(req,res)=>{
    const csv=header+displayRows.map(row=>[row.collection,row.name,row.tokenId,aud(row.price),aud(row.reference),aud(row.totalWithFeesEth),row.estimatedProfitAud===null||row.estimatedProfitAud===undefined?'':Number(row.estimatedProfitAud).toFixed(4),row.discount,row.netEdge,row.sales30d,row.eligible,row.id,rate.available?rate.spot:'',rate.available?new Date(rate.fetchedAt).toISOString():''].map(quote).join(',')).join('\n');
    return send(res,200,csv,'text/csv; charset=utf-8');
   }
-  if(req.method!=='POST'||!['/api/settings','/api/refresh','/api/opensea/test','/api/arm','/api/disarm','/api/update/install','/api/update/preferences'].includes(uri.pathname))return send(res,404,{error:'Not found'});
+  if(req.method!=='POST'||!['/api/settings','/api/refresh','/api/scan/deep','/api/opensea/test','/api/arm','/api/disarm','/api/update/install','/api/update/preferences'].includes(uri.pathname))return send(res,404,{error:'Not found'});
   // Local-only API; prevent another browser tab/site from posting by cross-site fetch/forms.
   const origin=req.headers.origin;if(origin&&origin!==`http://127.0.0.1:${PORT}`&&origin!==`http://localhost:${PORT}`)return send(res,403,{error:'Invalid origin'});
   if(req.headers['content-type']?.split(';')[0]!=='application/json')return send(res,415,{error:'Use application/json'});
@@ -441,7 +461,7 @@ const server=http.createServer(async(req,res)=>{
    if(state.settings.minimumFiatPrice!==updated.minimumFiatPrice||state.settings.fiatCurrency!==updated.fiatCurrency||
        ['maximumPriceAud','dailyBudgetAud','minPriceAud','minEstimatedProfitAud'].some(k=>state.settings[k]!==updated[k]))liveArmed=false;
    const keyChanged=state.settings.openSeaApiKey!==updated.openSeaApiKey;
-   state.settings=updated;save();schedule();event('system','Live market settings saved');
+   state.settings=updated;nextDeepScanAt=0;save();schedule();event('system','Live market settings saved');
    if(keyChanged){
      nextOpenSeaCheckAt=0;
      openSeaConnection={status:updated.openSeaApiKey?'checking':'needs-key',checkedAt:0,message:updated.openSeaApiKey?'Verifying the newly saved OpenSea key…':'No OpenSea API key has been saved.'};
@@ -451,6 +471,12 @@ const server=http.createServer(async(req,res)=>{
    void scan();return send(res,200,{ok:true});
   }
   if(uri.pathname==='/api/refresh'){void scan();return send(res,200,{ok:true});}
+  if(uri.pathname==='/api/scan/deep'){
+   if(updating||scanning)return send(res,409,{error:'A market scan or update is already running.'});
+   if(liveArmed)return send(res,409,{error:'Disarm live buying before running a manual deep scan.'});
+   void scan(true);
+   return send(res,200,{ok:true,mode:'deep',pageLimit:Math.max(state.settings.pagesPerCollection,state.settings.deepScanPages)});
+  }
   if(uri.pathname==='/api/disarm'){liveArmed=false;event('system','Live autobuyer disarmed');return send(res,200,{ok:true});}
   if(uri.pathname==='/api/arm'){
    if(updating)return send(res,409,{error:'Cannot arm live buying during update installation.'});
