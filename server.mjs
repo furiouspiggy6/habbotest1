@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing,normalizeOrder,fiatMinimumStatus,applyFiatMinimum,effectiveAudSettings,audLimitSummary} from './core.mjs';
 import {scanMarket,createReadClients} from './market.mjs';
 import {scoreOpportunityRows,sortByOpportunity,applyConservativeResale} from './opportunity.mjs';
+import {addBidEvidence,decideAutomatically,decisionSummary} from './bid-market.mjs';
 import {fetchFiatRates} from './fiat.mjs';
 import {fetchOpenSeaAvatarListings,summarizeOpenSeaConnection} from './opensea.mjs';
 import {parseStackFloor} from './market-floor.mjs';
@@ -30,6 +31,7 @@ let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
 let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
 let liveArmed=false,liveBuyInFlight=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
 let fiatRates=null,fiatRateError='',nextFiatCheckAt=0;
+let automatedSummary={ready:0,watched:0,passed:0,bidsObserved:0,best:null};
 let nextDeepScanAt=0,lastDeepScanAt=0,scanMode='regular',scanPages=0;
 let openSeaFeed={status:'needs-key',rows:[],pages:0,truncated:false,error:'Set an OpenSea API key to enable separate Ethereum NFT listings.',checkedAt:0};
 let openSeaInProgress=false,nextOpenSeaCheckAt=0;
@@ -163,6 +165,7 @@ function safeSummary(){return {
  liveEnvironmentEnabled:process.env.HABBO_ENABLE_LIVE_BUYS==='YES',warnings,stats,
  fiatQuote:{...fiatMinimumStatus({...state.settings,fiatCurrency:'AUD'},fiatRates),source:fiatRates?.source??'CoinGecko ETH spot',error:fiatRateError},
  audLimits:audLimitSummary(state.settings,fiatRates),
+ autoDecision:automatedSummary,
  listingCount:displayRows.length,candidateCount:displayRows.filter(x=>x.eligible).length,
  rows:displayRows.slice(0,50),events:state.events.slice(0,60),
  liveTrades:state.liveTrades.slice(-100).reverse(),
@@ -234,7 +237,7 @@ async function scan(forceDeep=false){if(scanning||updating)return;scanning=true;
   warnings=r.warnings;
   scanMode=deep?'deep':'regular';scanPages=requestedPages;
   if(deep)lastDeepScanAt=Date.now();
-  stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics,coverage:r.coverage,candidateDiagnostics:null,historyPending:r.historyPending,historyCompleted:r.historyCompleted};
+  stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,bids:(r.bids??[]).length,bidDiagnostics:r.bidDiagnostics??[],truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics,coverage:r.coverage,candidateDiagnostics:null,historyPending:r.historyPending,historyCompleted:r.historyCompleted};
   if(r.truncated)warnings.unshift('PARTIAL ACTIVE COVERAGE: at least one collection has more live offers than were retrieved. The page limit or a failed request interrupted its scan; see collection details.');
   // Refresh historical records as metadata arrives. Earlier versions persisted
   // unresolved FILLED orders permanently, even when subsequent scans found identity.
@@ -253,15 +256,17 @@ async function scan(forceDeep=false){if(scanning||updating)return;scanning=true;
   const partialCollections=r.diagnostics.filter(d=>d.status==='ACTIVE'&&(d.hasMore||d.error)).map(d=>d.collection);
   const priced=applyFiatMinimum(analyze(listings,chartSales,risk.settings),state.settings,fiatRates);
   const repriced=applyConservativeResale(priced,chartSales,state.settings,{audSpot:risk.spot});
-  const scored=scoreOpportunityRows(repriced,chartSales,{partialCollections});
-  displayRows=sortByOpportunity(scored.map(row=>{
+  const withBids=addBidEvidence(repriced,r.bids??[],state.settings,risk.spot);
+  const scored=scoreOpportunityRows(withBids,chartSales,{partialCollections});
+  displayRows=decideAutomatically(sortByOpportunity(scored.map(row=>{
    const scorePassed=state.settings.minOpportunityScore<=0||
      (row.opportunityScore!==null&&row.opportunityScore>=state.settings.minOpportunityScore);
    const bestOfferPassed=row.observedCheaperOffers===0;
    return {...row,scorePassed,bestOfferPassed,
     eligible:row.eligible&&risk.available&&scorePassed&&bestOfferPassed,
     fiatMinPassed:row.fiatMinPassed&&risk.available};
-  }));
+  }))),state.settings);
+  automatedSummary=decisionSummary(displayRows);
   if(!risk.available){
    warnings.unshift('Live AUD quote unavailable or older than 15 minutes: dollar-denominated signals and purchases are BLOCKED until the rate is refreshed.'+(fiatRateError?' '+fiatRateError:''));
   }
