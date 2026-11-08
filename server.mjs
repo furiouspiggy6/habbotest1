@@ -105,7 +105,8 @@ async function scan(){if(scanning||updating)return;scanning=true;
   state.historicalSales=hydrateNames([...salesById.values()],state.metadata).filter(x=>x.timestamp>=threshold).slice(-16000);
   chartSales=state.historicalSales;
   activeListings=listings;
-  displayRows=applyFiatMinimum(analyze(listings,chartSales,state.settings),state.settings,fiatRates);
+  displayRows=applyFiatMinimum(analyze(listings,chartSales,state.settings),state.settings,fiatRates)
+    .sort((a,b)=>Number(b.eligible)-Number(a.eligible)||(b.discount??-1000)-(a.discount??-1000));
   const fiatStatus=fiatMinimumStatus(state.settings,fiatRates);
   if(fiatStatus.required&&!fiatStatus.available){
    warnings.unshift('Dollar minimum cannot be checked: live ETH/AUD-USD conversion unavailable or older than 15 minutes. All purchase candidates are BLOCKED until a fresh quote is received.'+(fiatRateError?' '+fiatRateError:''));
@@ -295,6 +296,7 @@ const server=http.createServer(async(req,res)=>{
    if(process.env.HABBO_ENABLE_LIVE_BUYS!=='YES')return send(res,400,{error:'Live buying disabled by .env safeguard.'});
    if(!/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''))return send(res,400,{error:'No valid dedicated wallet private key configured.'});
    if(!scannedAt||Date.now()-scannedAt>state.settings.refreshSeconds*3000||!stats.sales)return send(res,400,{error:'Refresh live market data first; verified sales history is required.'});
+   if(state.settings.minimumFiatPrice>0&&!fiatMinimumStatus(state.settings,fiatRates).available)return send(res,409,{error:'Cannot arm live buying: fresh ETH-to-dollar price quote is unavailable. No purchases are permitted until the quote is restored.'});
    liveArmed=true;event('system','LIVE auto-buy ARMED until you disarm, restart or an order fails');return send(res,200,{ok:true});
   }
  }catch(e){return send(res,400,{error:String(e?.message??e)});}
