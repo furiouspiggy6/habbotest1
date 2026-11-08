@@ -57,7 +57,10 @@ export function createReadClients(publishableKey='',fetcher=globalThis.fetch,api
    }),
    getListing:orderId=>read(`/v1/chains/${chainName}/orders/listings/${encodeURIComponent(orderId)}`)
   },
-  blockchainData:{getNFT:request=>read(`/v1/chains/${chainName}/collections/${encodeURIComponent(request.contractAddress)}/nfts/${encodeURIComponent(request.tokenId)}`)}
+  blockchainData:{
+   getNFT:request=>read(`/v1/chains/${chainName}/collections/${encodeURIComponent(request.contractAddress)}/nfts/${encodeURIComponent(request.tokenId)}`),
+   getStack:stackId=>read(`/v1/chains/${chainName}/stacks/${encodeURIComponent(stackId)}`)
+  }
  };
 }
 
