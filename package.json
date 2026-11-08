@@ -1,6 +1,6 @@
 {
   "name": "habbo-nft-market-radar",
-  "version": "2.0.11",
+  "version": "2.0.12",
   "private": true,
   "type": "module",
   "description": "Windows desktop Habbo NFT scanner with live Immutable data and native automatic updates",
@@ -9,7 +9,7 @@
     "start:legacy": "node server.mjs",
     "test": "npm run check:ui && node --test tests/*.test.mjs tests/*.test.cjs",
     "dist:win": "electron-builder --win nsis --x64 --publish never",
-    "check:ui": "node --check public/app.js"
+    "check:ui": "node --check public/app.js && node --check server.mjs && node --check core.mjs && node --check fiat.mjs && node --check trade.mjs"
   },
   "engines": {
     "node": ">=24"
