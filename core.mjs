@@ -128,7 +128,9 @@ export function effectiveAudSettings(settings,quote,now=Date.now()){
  // Preserve the original absolute WETH safety caps even when AUD limits are high.
  return {settings:{...settings,maximumPriceEth:Math.min(2,convert('maximumPriceAud','maximumPriceEth')),
   dailyBudgetEth:Math.min(5,convert('dailyBudgetAud','dailyBudgetEth')),
-  minPriceEth:convert('minPriceAud','minPriceEth')},
+  minPriceEth:convert('minPriceAud','minPriceEth'),
+  minimumTotalPriceEth:Number(settings.minimumFiatPrice)>0?
+   Number(settings.minimumFiatPrice)/(settings.fiatCurrency==='USD'?Number(quote.usd):q.spot):0},
   available:true,spot:q.spot,required:enabled};
 }
 export function audLimitSummary(settings,quote,now=Date.now()){
