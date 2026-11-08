@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {WETH,COLLECTIONS,normalizeOrder,weiToEth,analyze,DEFAULT_SETTINGS,demoOrders,candles,hydrateNames,validateSettings} from '../core.mjs';
+import {WETH,COLLECTIONS,normalizeOrder,weiToEth,analyze,DEFAULT_SETTINGS,demoOrders,candles,hydrateNames,validateSettings,safeTime,orderRejectionReason} from '../core.mjs';
 function mk(status='ACTIVE',token='ERC20',addr=WETH){return {id:'A',buy:[{item_type:token,contract_address:addr,start_amount:'2000000000000000'}],sell:[{item_type:'ERC721',contract_address:COLLECTIONS[0].address,token_id:'42',start_amount:'1'}],status:{name:status},updated_at:'2026-11-05T11:00:00Z'};}
 test('ETH amount conversion',()=>{assert.equal(weiToEth('1000000000000000000'),1);assert.equal(weiToEth('500000000000000'),0.0005);});
 test('accepts known bridged ETH only (NOT native IMX or unknown ERC20)',()=>{
@@ -16,3 +16,14 @@ test('never use active asks as historical transactions',()=>{const d=demoOrders(
 test('never buy unidentified metadata or multi-quantity orders',()=>{const d=demoOrders();assert.ok(!analyze([{...d.listings[0],metadataResolved:false}, {...d.listings[0],quantity:2}],d.filled,DEFAULT_SETTINGS)[0].eligible);});
 test('group names by metadata ID or exact name inside collection',()=>{const addr=COLLECTIONS[0].address;const orders=[{contract:addr,tokenId:'1'},{contract:addr,tokenId:'2'}];const a=hydrateNames(orders,{[`${addr}|1`]:{name:'Golden Sofa'},[`${addr}|2`]:{name:'Golden Sofa'}});assert.equal(a[0].key,a[1].key);});
 test('rejects nonsense risk settings',()=>{assert.throws(()=>validateSettings({...DEFAULT_SETTINGS,minSales30d:0}));assert.throws(()=>validateSettings({...DEFAULT_SETTINGS,dailyBudgetEth:0.001}));assert.equal(validateSettings(DEFAULT_SETTINGS).mode,'live');});
+
+test('Immutable timestamps: numbers, seconds strings, millisecond strings, ISO date',()=>{
+ const target=1697498374000;
+ assert.equal(safeTime(1697498374),target);
+ assert.equal(safeTime('1697498374'),target);
+ assert.equal(safeTime('1697498374000'),target);
+ assert.equal(safeTime('2023-10-16T23:19:34.000Z'),target);
+ const sample=mk('FILLED');sample.updated_at='1697498374';
+ assert.equal(normalizeOrder(sample,COLLECTIONS[0],'FILLED').timestamp,target);
+ assert.equal(orderRejectionReason(mk('ACTIVE','NATIVE'),COLLECTIONS[0]),'not ERC20 priced');
+});
