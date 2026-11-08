@@ -132,7 +132,7 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
  $('pageSummary').textContent=found.length?`Showing ${start+1}–${start+limited.length} of ${found.length} · Page ${pageIndex+1}/${totalPages}`:'No matching listings';
  $('pagePrev').disabled=pageIndex===0;
  $('pageNext').disabled=pageIndex>=totalPages-1;
- body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.price)}</td><td>${audCash(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td><td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
+ body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.totalWithFeesEth)}</td><td>${audCash(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td><td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
  body.querySelectorAll('tr').forEach(tr=>tr.addEventListener('click',()=>{selectedId=tr.dataset.order;renderMarket();void loadChart(true);}));
  body.querySelectorAll('.row-inspect').forEach(btn=>btn.addEventListener('click',event=>{
   event.stopPropagation();selectedId=btn.dataset.inspectOrder;
@@ -164,7 +164,7 @@ function renderMarket(){if(!data)return;renderBanner();renderStats();filterRows(
 function renderDetail(){const r=selectedRow();
  $('inspectSelectedBtn').disabled=!r;
  if(!r){$('chartTitle').textContent='Select an NFT';$('detailPrice').textContent='—';$('detailDiscount').textContent='—';$('detailSales').textContent='—';$('detailMedian').textContent='—';$('detailEdge').textContent='—';return;}
- $('chartTitle').textContent=r.name;$('detailPrice').textContent=audCash(r.price);$('detailDiscount').textContent=r.discount===null?'Unpriced':(r.discount>0?'↓ ':'↑ ')+percent(Math.abs(r.discount));
+ $('chartTitle').textContent=r.name;$('detailPrice').textContent=audCash(r.totalWithFeesEth);$('detailDiscount').textContent=r.discount===null?'Unpriced':(r.discount>0?'↓ ':'↑ ')+percent(Math.abs(r.discount));
  $('detailDiscount').style.color=r.discount>0?'#55e0bc':'#8497a9';$('detailSales').textContent=r.sales30d;
  $('detailMedian').textContent=audCash(r.reference);$('detailEdge').textContent=percent(r.netEdge);
 }
@@ -199,7 +199,7 @@ function renderInspection(info){
  $('inspectContent').innerHTML=`
   <div class="inspect-intro">${img}<div><h3>${htmlSafe(r.name)}</h3><small>${htmlSafe(r.collection)} · ${htmlSafe(r.tokenType||'NFT')} · Token #${htmlSafe(r.tokenId)}</small><div><span class="inspect-signal ${r.eligible?'':'watch'}">${qualified}</span></div></div></div>
   <div class="inspect-metrics">
-   ${metric('Listed unit price',inspectPrice(r.price))}
+   ${metric('Seller asking price (excl. fees)',inspectPrice(r.price))}
    ${metric('30D reference / unit',ref)}
    ${metric('Discount vs reference',inspectPct(r.discount),r.discount>=0?'good':'bad')}
    ${metric('Estimated net profit',inspectPrice(estimateProfit),profitClass)}
