@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing,normalizeOrder,fiatMinimumStatus,applyFiatMinimum,effectiveAudSettings,audLimitSummary} from './core.mjs';
 import {scanMarket,createReadClients} from './market.mjs';
 import {fetchFiatRates} from './fiat.mjs';
+import {parseStackFloor} from './market-floor.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
 import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
@@ -28,6 +29,24 @@ let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start aft
 let liveArmed=false,liveBuyInFlight=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
 let fiatRates=null,fiatRateError='',nextFiatCheckAt=0;
 const orderVerificationCache=new Map();
+const stackFloorCache=new Map();
+async function verifyReadOnlyStackFloor(row){
+ const now=Date.now();
+ const match=typeof row.key==='string'?row.key.match(/\\|metadata:(.+)$/):null;
+ if(!match)return {status:'unavailable',checkedAt:now,reason:'No verified metadata stack ID was provided for this NFT'};
+ const stackId=match[1];
+ const key=row.contract+'|'+stackId,cached=stackFloorCache.get(key);
+ if(cached&&now-cached.checkedAt<2*60_000)return cached;
+ let floor;
+ try{
+  const client=createReadClients(state.settings.publishableKey);
+  const response=await client.blockchainData.getStack(stackId);
+  floor={...parseStackFloor(response,row.contract,stackId),checkedAt:now};
+ }catch(err){floor={status:'unavailable',checkedAt:now,reason:'Independent stack floor request failed: '+String(err?.message??err).slice(0,150)};}
+ if(stackFloorCache.size>250)stackFloorCache.clear();
+ stackFloorCache.set(key,floor);
+ return floor;
+}
 async function verifyReadOnlyOrder(row){
  const now=Date.now(),cached=orderVerificationCache.get(row.id);
  if(cached&&now-cached.checkedAt<45_000)return cached;
@@ -297,9 +316,11 @@ const server=http.createServer(async(req,res)=>{
    const listing=displayRows.find(row=>row.id===id);
    if(!listing)return send(res,404,{error:'This listing is no longer in the most recent live scan. Refresh and inspect again.'});
    const details=inspectListing(listing,state.historicalSales,state.settings,scannedAt);
-   const audit=await verifyReadOnlyOrder(listing);
+   const [audit,stackFloor]=await Promise.all([
+    verifyReadOnlyOrder(listing),verifyReadOnlyStackFloor(listing)
+   ]);
    const rate=fiatMinimumStatus({...state.settings,fiatCurrency:'AUD'},fiatRates);
-   return send(res,200,{...details,priceAudit:audit,
+   return send(res,200,{...details,priceAudit:audit,stackFloor,
     audRate:{available:rate.available,spot:rate.spot,fetchedAt:rate.fetchedAt,source:fiatRates?.source||'CoinGecko ETH spot'},
     coveragePartial:stats.truncated>0});
   }
