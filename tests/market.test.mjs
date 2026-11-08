@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {COLLECTIONS,WETH} from '../core.mjs';
-import {collectPage,resolveMetadata,unpackPage,createReadClients} from '../market.mjs';
+import {collectPage,resolveMetadata,unpackPage,createReadClients,prioritizedMetadataOrders} from '../market.mjs';
 const col=COLLECTIONS[0];
 function order(id,status='ACTIVE',tokenId='12') {return {id,buy:[{item_type:'ERC20',contract_address:WETH,start_amount:'1000000000000000'}],sell:[{item_type:'ERC721',contract_address:col.address,token_id:tokenId,start_amount:'1'}],status:{name:status},created_at:'2026-11-07T09:00:00Z',updated_at:'2026-11-07T12:00:00Z'};}
 test('orderbook pagination, deduplication and coverage flag',async()=>{
@@ -72,4 +72,21 @@ test('scanner supports next page cursor using actual API query parameter',async(
  const result=await collectPage(cli.orderbook,col,'ACTIVE',2);
  assert.deepEqual(result.orders.map(x=>x.id),['one','two']);
  assert.equal(calls[1].searchParams.get('page_cursor'),'curs/+/=');
+});
+
+test('metadata queue progresses through sales and active listings instead of starving history',()=>{
+ const make=(tokenId,price=0.002)=>({contract:col.address,tokenId,price,timestamp:Date.now()});
+ const active=Array.from({length:150},(_,i)=>make(String(i+1),0.001+i*0.00001));
+ const sold=Array.from({length:150},(_,i)=>make(String(500+i)));
+ const queue=prioritizedMetadataOrders(active,sold,{},80);
+ assert.equal(queue.length,80);
+ assert.equal(queue.filter(x=>Number(x.tokenId)<500).length,40);
+ assert.equal(queue.filter(x=>Number(x.tokenId)>=500).length,40);
+});
+test('failed metadata fetch is deferred rather than permanently blocking following NFT lookup',async()=>{
+ const cache={};const obj={contract:col.address,tokenId:'999991',timestamp:Date.now()};
+ const client={getNFT:async()=>{throw Error('temporarily missing');}};
+ const result=await resolveMetadata(client,[obj],cache,1);
+ assert.equal(result.failed,1);
+ assert.deepEqual(prioritizedMetadataOrders([obj],[],cache,10),[]);
 });
