@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {HABBO_AVATAR_CONTRACT,parseOpenSeaAvatarListing,fetchOpenSeaAvatarListings} from '../opensea.mjs';
+import {HABBO_AVATAR_CONTRACT,parseOpenSeaAvatarListing,fetchOpenSeaAvatarListings,summarizeOpenSeaConnection} from '../opensea.mjs';
 const hash='0x'+'c'.repeat(64);
 const raw=(value='178000000000000000')=>({
  status:'ACTIVE',chain:'ethereum',order_hash:hash,
@@ -81,4 +81,37 @@ test('OpenSea source is separate from tradable Immutable candidates and API key 
  assert.match(js,/function renderOpenSea\(/);
  assert.match(js,/watch-only/);
  assert.doesNotMatch(server,/displayRows=\[\.\.\.displayRows,\.\.\.openSeaFeed/);
+});
+
+test('connection checker distinguishes accepted, expired, denied, limited and failed keys without exposing key',async()=>{
+ const key='top-secret-test-key-abcdef';
+ const fake=(status,body='{}')=>async(url,opts)=>{
+  assert.equal(opts.method,'GET');
+  assert.equal(opts.headers['X-API-KEY'],key);
+  assert.match(url,/limit=100/);
+  return new Response(body,{status});
+ };
+ const accepted=await fetchOpenSeaAvatarListings(key,{fetcher:fake(200,JSON.stringify({listings:[],next:null})),maxPages:1});
+ assert.equal(summarizeOpenSeaConnection(accepted).status,'connected');
+ for(const [http,status] of [[401,'invalid'],[403,'forbidden'],[429,'rate-limited'],[503,'error']]){
+  const feed=await fetchOpenSeaAvatarListings(key,{fetcher:fake(http),maxPages:1});
+  const summary=summarizeOpenSeaConnection(feed);
+  assert.equal(summary.status,status);
+  assert.ok(summary.checkedAt>0);
+  assert.doesNotMatch(JSON.stringify(summary),/top-secret-test-key/);
+ }
+ assert.equal(summarizeOpenSeaConnection(await fetchOpenSeaAvatarListings('')).status,'needs-key');
+});
+test('Settings exposes manual OpenSea test and server redacts the saved key',()=>{
+ const server=readFileSync(new URL('../server.mjs',import.meta.url),'utf8');
+ const html=readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+ const js=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ assert.match(server,/uri\.pathname==='\/api\/opensea\/test'/);
+ assert.match(server,/maxPages:1/);
+ assert.match(server,/openSeaConnection:\{\.\.\.openSeaConnection,loading:/);
+ assert.match(server,/settings:\{\.\.\.state\.settings,openSeaApiKey:''\}/);
+ assert.match(html,/id="openSeaKeyStatus"/);
+ assert.match(html,/id="testOpenSeaBtn" type="button"/);
+ assert.match(js,/function renderOpenSeaConnection\(/);
+ assert.match(js,/renderOpenSeaConnection\(\)/);
 });
