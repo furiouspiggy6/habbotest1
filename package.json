@@ -1,9 +1,9 @@
 {
   "name": "habbo-nft-market-radar",
-  "version": "1.0.9",
+  "version": "1.0.10",
   "private": true,
   "type": "module",
-  "description": "Live Immutable zkEVM NFT market scanner with price history, paper alerts and gated experimental trading",
+  "description": "Live-only Habbo Immutable zkEVM NFT market scanner with verified historical pricing and gated experimental buying",
   "scripts": {
     "start": "node server.mjs",
     "test": "node --test tests/*.test.mjs"
