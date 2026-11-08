@@ -103,7 +103,7 @@ function renderStats(){$('statListings').textContent=data.listingCount??0;$('sta
  const cv=data.stats.coverage,cd=data.stats.candidateDiagnostics;
  const coverage=cv?`Verified NFT identity: ${cv.activeResolved}/${cv.activeTotal} active · ${cv.salesResolved}/${cv.salesTotal} sold · ${cv.fetchedThisScan} resolved this scan, ${cv.failedThisScan} failed.`:'Metadata coverage not available yet.';
  const historyLine=`Historical sales: ${data.stats.historyPending??0} collection(s) still indexing older pages; ${data.stats.historyCompleted??0} reached the end this scan. ${data.stats.historicalSales??0} unique sales cached locally.`;
- const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.belowEstimatedProfit??0} below A$ profit minimum; ${cd.cheaperComparableOffer??0} cheaper competing comparable offer; ${cd.belowOpportunityScore??0} below optional opportunity score; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
+ const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.noComparableCurrentAsk??0} without a competing current ask; ${cd.belowConservativeDiscount??0} below conservative resale discount; ${cd.belowEstimatedProfit??0} below A$ profit minimum; ${cd.cheaperComparableOffer??0} cheaper competing comparable offer; ${cd.belowOpportunityScore??0} below optional opportunity score; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
  $('scanDiagnostics').textContent=([`Immutable scan segments: ${data.stats.successfulRequests??0} completed / ${data.stats.failedRequests??0} failed or interrupted. ${data.stats.rawOrders??0} raw orders received.`,coverage,historyLine,reasons,...data.warnings,`Rejected orders: ${JSON.stringify(data.stats.rejected||{})}`, ...((data.stats.diagnostics||[]).map(d=>`${d.collection} ${d.status}: ${d.error||`${d.accepted}/${d.raw} accepted (${d.pages} pages)${d.shape?' shape='+JSON.stringify(d.shape):''}`}`))].join('\n')); 
 }
 function withinAudRange(row){
@@ -137,7 +137,7 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
  $('pageSummary').textContent=found.length?`Showing ${start+1}–${start+limited.length} of ${found.length} · Page ${pageIndex+1}/${totalPages}`:'No matching listings';
  $('pagePrev').disabled=pageIndex===0;
  $('pageNext').disabled=pageIndex>=totalPages-1;
- body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.totalWithFeesEth)}</td><td class="${r.estimatedProfitAud!==null&&r.estimatedProfitAud>=0?'positive':'neutral'}">${r.estimatedProfitAud===null||r.estimatedProfitAud===undefined?'—':audLimit(r.estimatedProfitAud)}</td><td><span class="opportunity-score ${r.opportunityScore!==null&&r.opportunityScore>=70?'strong':''}" title="${htmlSafe((r.scoreCautions||[]).join(' | ')||'Heuristic score, not a resale guarantee')}">${r.opportunityScore===null?'—':r.opportunityScore+'/100'}</span><small class="score-confidence">${htmlSafe((r.confidence||'low').toUpperCase())} confidence</small></td><td>${audCash(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td><td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
+ body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}${r.groupedOfferCount>1?' · '+r.groupedOfferCount+' offers':''}</div></td><td class="price">${audCash(r.totalWithFeesEth)}</td><td class="${r.estimatedProfitAud!==null&&r.estimatedProfitAud>=0?'positive':'neutral'}">${r.estimatedProfitAud===null||r.estimatedProfitAud===undefined?'—':audLimit(r.estimatedProfitAud)}</td><td><span class="opportunity-score ${r.opportunityScore!==null&&r.opportunityScore>=70?'strong':''}" title="${htmlSafe((r.scoreCautions||[]).join(' | ')||'Heuristic score, not a resale guarantee')}">${r.opportunityScore===null?'—':r.opportunityScore+'/100'}</span><small class="score-confidence">${htmlSafe((r.confidence||'low').toUpperCase())} confidence</small></td><td>${audCash(r.conservativeResaleEth)}</td><td class="${r.conservativeDiscountPct>=0?'positive':'neutral'}">${r.conservativeDiscountPct==null?'—':(r.conservativeDiscountPct>0?'-':'')+percent(Math.abs(r.conservativeDiscountPct))}</td><td>${r.sales30d}</td><td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td><td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
  body.querySelectorAll('tr').forEach(tr=>tr.addEventListener('click',()=>{selectedId=tr.dataset.order;renderMarket();void loadChart(true);}));
  body.querySelectorAll('.row-inspect').forEach(btn=>btn.addEventListener('click',event=>{
   event.stopPropagation();selectedId=btn.dataset.inspectOrder;
@@ -188,9 +188,9 @@ function renderMarket(){if(!data)return;renderBanner();renderStats();filterRows(
 function renderDetail(){const r=selectedRow();
  $('inspectSelectedBtn').disabled=!r;
  if(!r){$('chartTitle').textContent='Select an NFT';$('detailPrice').textContent='—';$('detailDiscount').textContent='—';$('detailSales').textContent='—';$('detailMedian').textContent='—';$('detailEdge').textContent='—';return;}
- $('chartTitle').textContent=r.name;$('detailPrice').textContent=audCash(r.totalWithFeesEth);$('detailDiscount').textContent=r.discount===null?'Unpriced':(r.discount>0?'↓ ':'↑ ')+percent(Math.abs(r.discount));
- $('detailDiscount').style.color=r.discount>0?'#55e0bc':'#8497a9';$('detailSales').textContent=r.sales30d;
- $('detailMedian').textContent=audCash(r.reference);$('detailEdge').textContent=percent(r.netEdge);
+ $('chartTitle').textContent=r.name;$('detailPrice').textContent=audCash(r.totalWithFeesEth);$('detailDiscount').textContent=r.conservativeDiscountPct===null?'Unpriced':(r.conservativeDiscountPct>0?'↓ ':'↑ ')+percent(Math.abs(r.conservativeDiscountPct));
+ $('detailDiscount').style.color=r.conservativeDiscountPct>0?'#55e0bc':'#8497a9';$('detailSales').textContent=r.sales30d;
+ $('detailMedian').textContent=audCash(r.conservativeResaleEth);$('detailEdge').textContent=percent(r.netEdge);
 }
 // Deep inspection uses a snapshot of the live order and ONLY cached, verified filled orders.
 let inspectedOrderId=null;
@@ -216,6 +216,10 @@ function renderInspection(info){
   ?(liveCheck.priceChanged||liveCheck.feesChanged?'Changed — verify before buying':'Matched original Immutable order')
   :'Not independently verified — '+(liveCheck?.message||'API unavailable'));
  const ref=r.reference===null?'Not enough data':inspectPrice(r.reference);
+ const resale=r.conservativeResaleEth===null?'Not verified':inspectPrice(r.conservativeResaleEth);
+ const breakEvenAud=Number.isFinite(r.estimatedFiatCost)&&
+  Number(estimate.resaleFeePct)<100?
+  (r.estimatedFiatCost+Number(r.estimatedExtraCostsAud??0))/(1-Number(estimate.resaleFeePct)/100):null;
  const estimateProfit=estimate.estimatedProfitEth;
  const profitClass=estimateProfit===null?'':estimateProfit>=0?'good':'bad';
  const qualified=r.eligible?'● BUY-QUALIFIED CANDIDATE':'● WATCH / NOT QUALIFIED';
@@ -224,8 +228,9 @@ function renderInspection(info){
   <div class="inspect-intro">${img}<div><h3>${htmlSafe(r.name)}</h3><small>${htmlSafe(r.collection)} · ${htmlSafe(r.tokenType||'NFT')} · Token #${htmlSafe(r.tokenId)}</small><div><span class="inspect-signal ${r.eligible?'':'watch'}">${qualified}</span></div></div></div>
   <div class="inspect-metrics">
    ${metric('Seller asking price (excl. fees)',inspectPrice(r.price))}
-   ${metric('30D reference / unit',ref)}
-   ${metric('Discount vs reference',inspectPct(r.discount),r.discount>=0?'good':'bad')}
+   ${metric('30D completed-sale median',ref)}
+   ${metric('Conservative resale ceiling',resale)}
+   ${metric('Discount vs resale ceiling',inspectPct(r.conservativeDiscountPct),r.conservativeDiscountPct>=0?'good':'bad')}
    ${metric('Estimated net profit (after extra costs)',r.estimatedProfitAud===null?'—':audLimit(r.estimatedProfitAud),r.estimatedProfitAud>=0?'good':'bad')}
    ${metric('Opportunity score',r.opportunityScore===null?'—':r.opportunityScore+'/100')}
    ${metric('Liquidity / confidence',String(r.liquidity||'low').toUpperCase()+' / '+String(r.confidence||'low').toUpperCase())}
@@ -249,6 +254,14 @@ function renderInspection(info){
    ${inspectPair('Dollar minimum satisfied',r.fiatMinPassed?'Yes':'No — listing excluded')}
    ${inspectPair('Profit requirement satisfied',r.minProfitPassed?'Yes':'No — below configured A$ minimum')}
    ${inspectPair('Assumed resale fee',inspectPct(estimate.resaleFeePct))}
+    ${inspectPair('30D historical sale median',ref)}
+    ${inspectPair('7D verified sales median',r.recentSevenDayMedianEth===null?'Insufficient verified recent sales':inspectPrice(r.recentSevenDayMedianEth))}
+    ${inspectPair('Next competing ACTIVE asking price',r.currentCompetitorAskEth===null?'None found in scan':inspectPrice(r.currentCompetitorAskEth))}
+    ${inspectPair('Conservative resale ceiling',resale)}
+    ${inspectPair('Why this resale ceiling',r.resaleEstimateBasis||'Unknown')}
+    ${inspectPair('Assumed undercut on next ask',Number(r.resaleUndercutPct??2).toFixed(1)+'%')}
+    ${inspectPair('Break-even resale price (AUD)',breakEvenAud===null?'Unknown':audLimit(breakEvenAud))}
+    ${inspectPair('Separate comparable live ask required',r.marketEvidencePassed?'Verified in scan':'No — watch only')}
     ${inspectPair('Reserved extra costs (AUD)',audLimit(r.estimatedExtraCostsAud??0))}
     ${inspectPair('Optional minimum score satisfied',r.scorePassed?'Yes':'No — below your score minimum')}
     ${inspectPair('Cheapest observed comparable offer',r.bestOfferPassed?'Yes':'No — cheaper live offer seen')}
@@ -265,7 +278,7 @@ function renderInspection(info){
    ${inspectPair('Listing price filter',r.eligible?'Qualified':'Review strategy limits')}
   </div>
   <h3 class="inspect-section-title">Opportunity scoring and risks</h3>
-   <p class="inspect-meta">Heuristic ranking only: profit after your configured fee/cost allowance, completed-sale frequency and recency, observed competing ACTIVE orders, and 7-day versus 30-day price movement. It is not a resale probability.</p>
+   <p class="inspect-meta">Heuristic ranking only. Profit uses the lowest of the 30-day sale median, 7-day median (with at least 3 sales), and 2% below the nearest other live asking price. Seller asks are not guaranteed buyer bids. It is not a resale probability.</p>
    <div class="inspect-warning">${(r.scoreCautions&&r.scoreCautions.length?r.scoreCautions:['No additional score warnings identified in the scanned data.']).map(htmlSafe).join(' · ')} Unobserved listings and bids may affect liquidity.</div>
    <h3 class="inspect-section-title">Comparable completed sales — last 90 days</h3>
   <p class="inspect-meta">${h.count30d} within 30 days; ${h.count90d} within 90 days. These are other orders with matching verified collectible identity, not necessarily sales of this token ID.</p>
@@ -276,7 +289,7 @@ function renderInspection(info){
    <button class="button ghost inspect-copy" type="button" data-copy="${htmlSafe(r.tokenId)}">Copy token ID</button>
    <button class="button ghost inspect-copy" type="button" data-copy="${htmlSafe(r.id)}">Copy order ID</button>
   </div>
-  <div class="inspect-warning">${info.coveragePartial?'The Immutable scan has partial active-listing coverage, so a cheaper marketplace offer may be missing from this feed. ':''}${stackFloor?.status==='available'&&stackFloor.priceEth<r.price-1e-9?'Immutable\'s separately indexed stack floor shows a cheaper WETH-priced offer than the selected cached listing. Compare both order IDs before any purchase. ':''}TokenTrove's AUD conversion and marketplace order may differ from this app. Compare the underlying ETH/WETH price and exact order rather than AUD alone. No TokenTrove live price was retrieved automatically. AUD estimates use the current ETH/AUD rate, not the exchange rate on historical sale dates. Immutable settlement is in WETH. Estimates assume resale at the 30-day reference price and subtract the configured ${htmlSafe(inspectPct(estimate.resaleFeePct))} resale fee and the listing's observed buyer fees. They exclude unbudgeted gas, slippage, future price changes, additional marketplace charges, and time-to-sell. Any configured extra cost reserve is deducted from the AUD profit display, but is not a live gas quote. A buyer is not guaranteed. Immutable FILLED order update timestamps may differ from actual settlement times. Data and live order availability can change after the last scan. Always confirm the offer on TokenTrove.</div>
+  <div class="inspect-warning">${info.coveragePartial?'The Immutable scan has partial active-listing coverage, so a cheaper marketplace offer may be missing from this feed. ':''}${stackFloor?.status==='available'&&stackFloor.priceEth<r.price-1e-9?'Immutable\'s separately indexed stack floor shows a cheaper WETH-priced offer than the selected cached listing. Compare both order IDs before any purchase. ':''}TokenTrove's AUD conversion and marketplace order may differ from this app. Compare the underlying ETH/WETH price and exact order rather than AUD alone. No TokenTrove live price was retrieved automatically. AUD estimates use the current ETH/AUD rate, not the exchange rate on historical sale dates. Immutable settlement is in WETH. Estimates assume resale at the conservative ceiling, which may be lower than the historical median. They subtract the configured ${htmlSafe(inspectPct(estimate.resaleFeePct))} resale fee and the listing's observed buyer fees. They exclude unbudgeted gas, slippage, future price changes, additional marketplace charges, and time-to-sell. Any configured extra cost reserve is deducted from the AUD profit display, but is not a live gas quote. A buyer is not guaranteed. Immutable FILLED order update timestamps may differ from actual settlement times. Data and live order availability can change after the last scan. Always confirm the offer on TokenTrove.</div>
   <div class="inspect-meta">Orderbook source: Immutable zkEVM · Cached scan ${htmlSafe(listingDate(info.lastScan))} · Rechecked ${htmlSafe(listingDate(liveCheck?.checkedAt))}<br>Collection contract: ${htmlSafe(r.contract)}<br>Immutable order ID: ${htmlSafe(r.id)}<br>The TokenTrove link opens a collection search, not a verified deep link to this exact order.</div>`;
  $('inspectContent').querySelectorAll('.inspect-copy').forEach(btn=>btn.addEventListener('click',async()=>{
   try{await navigator.clipboard.writeText(btn.dataset.copy);toast('Copied to clipboard');}
