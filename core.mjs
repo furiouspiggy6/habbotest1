@@ -204,7 +204,8 @@ export function inspectListing(row,history,settings,lastScan,now=Date.now()){
  const quantity=Number(row.quantity)||1;
  const totalCost=Number(row.totalWithFeesEth);
  const reference=Number(row.reference)>0?Number(row.reference):null;
- const resale=Number(row.conservativeResaleEth)>0?Number(row.conservativeResaleEth):null;
+ const resale=Object.hasOwn(row,'conservativeResaleEth')?
+  (Number(row.conservativeResaleEth)>0?Number(row.conservativeResaleEth):null):reference;
  const resaleFeePct=Number(settings.estimatedResaleFeesPct);
  const expectedProceeds=resale===null?null:resale*quantity*(1-resaleFeePct/100);
  const profit=expectedProceeds===null||!Number.isFinite(totalCost)?null:expectedProceeds-totalCost;
