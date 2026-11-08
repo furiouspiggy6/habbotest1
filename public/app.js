@@ -29,7 +29,11 @@ function renderBanner(){
   const activeCapped=Number(data.stats?.truncated)>0;
   const specificError=data.warnings.find(w=>/request failed|backfill stopped|history continuation failed|ACTIVE stopped|Live scan failed/i.test(w));
   b.className='banner '+(failureCount?'error-banner':'live-banner');
-  if(failureCount){
+  if(data.fiatQuote?.required&&!data.fiatQuote.available){
+   b.className='banner error-banner';
+   title='Dollar conversion unavailable — purchases blocked';
+   copy='The live AUD/USD-to-WETH price feed is unavailable or too old. No listings can qualify under your dollar minimum. '+(data.fiatQuote.error||'');
+  }else if(failureCount){
    title=`Immutable requests failed (${failureCount})`;
    copy=specificError||'Some collection requests failed. Open scan details for the exact error.';
   }else if(activeCapped){
