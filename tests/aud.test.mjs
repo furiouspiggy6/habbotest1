@@ -59,7 +59,7 @@ test('dashboard uses only AUD money inputs and preserves single initialization',
  }
  assert.match(js,/function audCash\(/);
  assert.match(js,/audCash\(r\.totalWithFeesEth\)/);
- assert.match(js,/audCash\(r\.reference\)/);
+ assert.match(js,/audCash\(r\.conservativeResaleEth\)/);
  assert.match(js,/audCash\(val\)/);
  assert.match(js,/function inspectPrice\(value\)\{return audCash\(value\);\}/);
  assert.match(js,/audLimit\(data\.liveSpentTodayAud\)/);
