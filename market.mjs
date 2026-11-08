@@ -15,11 +15,16 @@ export function createReadClients(publishableKey='',fetcher=globalThis.fetch,api
   const url=new URL(path,apiBase);
   for(const [name,value] of Object.entries(query))if(value!==undefined && value!==null && String(value)!=='')url.searchParams.set(name,String(value));
   let response;
-  // Retry one transient HTTP failure only. Respect a short Retry-After, without
-  // turning a large market scan into an unbounded waiting loop.
+  // Retry one transient HTTP failure or timeout. Never retry 401/403 or
+  // other non-transient errors. Keep retry budget bounded for deep scans.
   for(let attempt=0;attempt<2;attempt++){
-   try {response=await fetcher(url.toString(),{method:'GET',headers,signal:AbortSignal.timeout(16000)});}
-   catch(err){throw new Error(`Immutable API request failed (${url.pathname}): ${String(err?.message??err).slice(0,160)}. Check internet, DNS or firewall.`);}
+   try {response=await fetcher(url.toString(),{method:'GET',headers,signal:AbortSignal.timeout(20000)});}
+   catch(err){
+    const detail=String(err?.message??err).slice(0,160);
+    const isTimeout=err?.name==='TimeoutError'||(err?.name==='AbortError'&&/timeout|timed out|aborted due to timeout/i.test(detail))||/operation was aborted due to timeout/i.test(detail);
+    if(attempt===0&&isTimeout){await sleep(1000);continue;}
+    throw new Error(`Immutable API request failed (${url.pathname}): ${detail}.${isTimeout?' Request timed out after retry; earlier pages were preserved.':' Check internet, DNS or firewall.'}`);
+   }
    if(attempt===0&&[429,500,502,503,504].includes(response.status)){
     const retryAfter=Number(response.headers?.get?.('retry-after'));
     const delay=Number.isFinite(retryAfter)&&retryAfter>0?Math.min(retryAfter*1000,3000):800;
