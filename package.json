@@ -1,6 +1,6 @@
 {
   "name": "habbo-nft-market-radar",
-  "version": "2.0.20",
+  "version": "2.0.21",
   "private": true,
   "type": "module",
   "description": "Windows desktop Habbo NFT scanner with live Immutable data and native automatic updates",
@@ -9,13 +9,15 @@
     "start:legacy": "node server.mjs",
     "test": "npm run check:ui && node --test tests/*.test.mjs tests/*.test.cjs",
     "dist:win": "electron-builder --win nsis --x64 --publish never",
-    "check:ui": "node --check public/app.js && node --check public/listing-views.mjs && node --check market.mjs && node --check market-floor.mjs && node --check opensea.mjs && node --check server.mjs && node --check core.mjs && node --check opportunity.mjs && node --check fiat.mjs && node --check trade.mjs"
+    "check:ui": "node --check public/app.js && node --check public/listing-views.mjs && node --check market.mjs && node --check market-floor.mjs && node --check opensea.mjs && node --check server.mjs && node --check core.mjs && node --check opportunity.mjs && node --check bid-market.mjs && node --check fiat.mjs && node --check trade.mjs"
   },
   "engines": {
     "node": ">=24"
   },
   "dependencies": {
-    "electron-updater": "6.8.11"
+    "electron-updater": "6.8.11",
+    "@imtbl/sdk": "2.24.10",
+    "ethers": "6.17.0"
   },
   "productName": "Habbo NFT Market Radar",
   "main": "desktop/main.cjs",
@@ -35,6 +37,7 @@
       "desktop/**/*",
       "core.mjs",
       "opportunity.mjs",
+      "bid-market.mjs",
       "market.mjs",
       "market-floor.mjs",
       "opensea.mjs",
