@@ -1,5 +1,5 @@
 /**
- * Optional GitHub Releases updater. The application never silently installs code.
+ * GitHub Releases updater; auto-install is configurable and enabled by default.
  * Releases must include a version-named ZIP and a SHA-256 sidecar produced by CI.
  */
 import fs from 'node:fs';
@@ -20,6 +20,11 @@ const REQ_HEADERS={'Accept':'application/vnd.github+json','User-Agent':'Habbo-NF
 // Pure scheduling guard: never interrupt scanning or real-money trading.
 export function canAutoUpdate({enabled,platform,armed,scanning,updating,now,nextAttemptAt}){
  return enabled===true && platform==='win32' && !armed && !scanning && !updating && now>=nextAttemptAt;
+}
+// A read-only version check may safely run during a lengthy marketplace scan.
+// Installation still waits for scanning to finish and live buying to be disarmed.
+export function canAutoCheck({enabled,platform,armed,updating,now,nextAttemptAt}){
+ return enabled===true && platform==='win32' && !armed && !updating && now>=nextAttemptAt;
 }
 export function versionParts(version){
  const m=/^v?(\d+)\.(\d+)\.(\d+)$/.exec(String(version??''));
