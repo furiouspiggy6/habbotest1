@@ -26,8 +26,8 @@ const state=readState();
 let lastCheckedUpdate=null;
 let updating=false;
 let liveArmed=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
-let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[]};
-function save(){const output={schemaVersion:4,settings:state.settings,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),paperTrades:state.paperTrades.slice(-1000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
+let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[]};
+function save(){const output={schemaVersion:5,settings:state.settings,metadata:state.metadata,historicalSales:state.historicalSales.slice(-16000),paperTrades:state.paperTrades.slice(-1000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
  const tmp=storePath+'.tmp';fs.writeFileSync(tmp,JSON.stringify(output,null,2));fs.renameSync(tmp,storePath);}
 function event(kind,message){state.events.unshift({kind,message,time:Date.now()});state.events=state.events.slice(0,400);console.log(`[${kind}] ${message}`);}
 function today(t){return new Date(t).toISOString().slice(0,10);}
@@ -79,10 +79,10 @@ async function scan(){if(scanning||updating)return;scanning=true;
  try {
   let listings,filled;
   if(state.settings.mode==='demo'){
-   ({listings,filled}=demoOrders());warnings=['DEMO: all prices, sales and NFT names are invented examples. No real funds will move.'];stats={pages:0,metadata:8,sales:filled.length,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[]};
+   ({listings,filled}=demoOrders());warnings=['DEMO: all prices, sales and NFT names are invented examples. No real funds will move.'];stats={pages:0,metadata:8,sales:filled.length,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[]};
   }else{
    const r=await scanMarket(state.settings,state.metadata);({listings,filled}=r);
-   warnings=r.warnings;stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes};
+   warnings=r.warnings;stats={pages:r.pages,metadata:r.meta.ok,sales:filled.length,truncated:r.truncated,rawOrders:r.received,failedRequests:r.failedRequests,successfulRequests:r.successfulRequests,quoteTypes:r.quoteTypes,rejected:r.rejected,diagnostics:r.diagnostics};
    if(r.truncated)warnings.unshift('PARTIAL COVERAGE: not every listing or past sale was downloaded; signals are based on a limited sample.');
   }
   const isDemo=state.settings.mode==='demo';
