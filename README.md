@@ -114,6 +114,17 @@ Node 24+ includes the required `fetch` API. The Windows launcher does not run `n
 
 The first v1.0.7 scan and auto-updater still require internet access; the GitHub release installs through the app's automatic updater if v1.0.6 is installed and auto-update is enabled.
 
-### Windows updater compatibility (v1.0.8)
 
-The updater handles dependency-free releases without expecting `node_modules`. A single small, audited, pure-JS `semver` package is retained in this release so older update scripts can upgrade in place without failing when their staging install looks for `node_modules`. The SDK is **not** installed automatically and is **not** needed to display live market data. The full legacy trading SDK remains experimental and unused during scanning.
+## Repairing a stale installation (v1.0.9)
+
+If the dashboard still prints `Immutable SDK is not installed`, an **old copy** of the scanner is running. The v1.0.8+ REST scanner does not emit that error. The current local server version is exposed at `http://127.0.0.1:38571/api/state` under `appVersion`, with `installDirectory` on v1.0.9+.
+
+The `REPAIR_WINDOWS.ps1` script is a one-time self-repair option for users whose old auto-updater cannot finish. From a Windows PowerShell terminal **inside the folder containing `START_WINDOWS.bat`**, run:
+
+```powershell
+irm https://raw.githubusercontent.com/furiouspiggy6/habbotest1/main/REPAIR_WINDOWS.ps1 | iex
+```
+
+The script verifies the GitHub release ZIP using its SHA-256 sidecar, checks package identity/version, protects `data/` and `.env`, refuses to run while real-money trading is armed, stops only the app on its localhost port (when it is a node server.mjs process), stages the official update script and restarts the app. It does not require manual ZIP handling. Review the script on GitHub before using a remote script command. If there are multiple installed copies, run it in the folder of the copy you launch.
+
+New in v1.0.9: the updater checks GitHub even during a lengthy NFT scan, pauses new scans while an update is pending, then installs once the current scan finishes. If another copy owns the dashboard port, the launcher now prints that process's reported version rather than quietly opening the wrong dashboard.
