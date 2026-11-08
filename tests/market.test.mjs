@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {COLLECTIONS,WETH} from '../core.mjs';
-import {collectPage,resolveMetadata,unpackPage} from '../market.mjs';
+import {collectPage,resolveMetadata,unpackPage,createReadClients} from '../market.mjs';
 const col=COLLECTIONS[0];
 function order(id,status='ACTIVE',tokenId='12') {return {id,buy:[{item_type:'ERC20',contract_address:WETH,start_amount:'1000000000000000'}],sell:[{item_type:'ERC721',contract_address:col.address,token_id:tokenId,start_amount:'1'}],status:{name:status},created_at:'2026-11-07T09:00:00Z',updated_at:'2026-11-07T12:00:00Z'};}
 test('orderbook pagination, deduplication and coverage flag',async()=>{
@@ -31,4 +31,45 @@ test('reject reports distinguish incompatible currencies',async()=>{
  assert.equal(out.received,1);assert.equal(out.orders.length,0);
  assert.equal(out.rejections['not WETH priced'],1);
  assert.equal(out.sampleShape.status,'ACTIVE');
+});
+
+
+test('read-only Immutable REST scanner creates correct URLs and uses publishable key',async()=>{
+ const calls=[];
+ const fetcher=async (url,options)=>{
+  calls.push({url,options});
+  if(url.includes('/orders/listings'))return new Response(JSON.stringify({result:[order('live-123')],page:{next_cursor:null}}),{status:200});
+  return new Response(JSON.stringify({result:{name:'Golden Dragon',metadata_id:'test-meta',image:'https://example.org/nft.jpg'}}),{status:200});
+ };
+ const clients=createReadClients('pk_test',fetcher);
+ const listings=await collectPage(clients.orderbook,col,'ACTIVE',3);
+ assert.equal(listings.received,1);
+ assert.equal(listings.orders[0].id,'live-123');
+ const req=new URL(calls[0].url);
+ assert.equal(req.origin,'https://api.immutable.com');
+ assert.equal(req.pathname,'/v1/chains/imtbl-zkevm-mainnet/orders/listings');
+ assert.equal(req.searchParams.get('status'),'ACTIVE');
+ assert.equal(req.searchParams.get('sell_item_contract_address'),col.address);
+ assert.equal(req.searchParams.get('page_size'),'50');
+ assert.equal(calls[0].options.headers['x-immutable-publishable-key'],'pk_test');
+ const result=await resolveMetadata(clients.blockchainData,listings.orders,{},1);
+ assert.equal(result.ok,1);
+ assert.equal(result.cache[`${col.address}|12`].name,'Golden Dragon');
+ assert.ok(calls[1].url.includes(`/collections/${col.address}/nfts/12`));
+});
+
+test('read-only REST scanner supplies actionable Immutable HTTP errors (not a false missing SDK warning)',async()=>{
+ const cli=createReadClients('',async()=>new Response(JSON.stringify({message:'Publishable key needed'}),{status:401}));
+ await assert.rejects(()=>cli.orderbook.listListings({sellItemContractAddress:col.address,status:'ACTIVE',pageSize:50}),/HTTP 401.*Publishable key needed/);
+});
+
+test('scanner supports next page cursor using actual API query parameter',async()=>{
+ const calls=[];
+ const cli=createReadClients('',async url=>{
+  calls.push(new URL(url));
+  return new Response(JSON.stringify(calls.length===1?{result:[order('one')],page:{next_cursor:'curs/+/='}}:{result:[order('two')],page:{}}),{status:200});
+ });
+ const result=await collectPage(cli.orderbook,col,'ACTIVE',2);
+ assert.deepEqual(result.orders.map(x=>x.id),['one','two']);
+ assert.equal(calls[1].searchParams.get('page_cursor'),'curs/+/=');
 });
