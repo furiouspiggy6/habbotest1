@@ -100,6 +100,46 @@ export function analyze(listings,filled,settings,now=Date.now()){
    discount:discount===null?null:round(discount,1),netEdge:netEdge===null?null:round(netEdge,1),eligible};
  }).sort((a,b)=>Number(b.eligible)-Number(a.eligible)||(b.discount??-1000)-(a.discount??-1000));
 }
+/** An external marketplace SEARCH, not a claim that a specific order is still active. */
+export function marketplaceSearchUrl(row){
+ const category={Furni:'HabboFurni',Clothes:'HabboClothes',Tokens:'HabboTokens'}[row.collection]||'Habbo';
+ const u=new URL(`https://tokentrove.com/collection/${category}`);
+ if(category!=='Habbo'&&row.metadataResolved&&row.name)u.searchParams.set('search',String(row.name).slice(0,100));
+ return u.href;
+}
+/** Read-only inspection of a listing and locally cached, verified comparable fills.
+ * Time of an Immutable FILLED record is its order update timestamp, which may
+ * differ from transaction settlement time. Projections are not sale promises.
+ */
+export function inspectListing(row,history,settings,lastScan,now=Date.now()){
+ if(!row)return null;
+ const DAY=86400000;
+ const comparable=history.filter(s=>s.metadataResolved&&s.key===row.key&&Number.isFinite(s.timestamp)&&
+  s.timestamp<=now&&s.timestamp>=now-90*DAY&&Number.isFinite(s.price)&&s.price>0);
+ const sold30=comparable.filter(s=>s.timestamp>=now-30*DAY);
+ const quantity=Number(row.quantity)||1;
+ const totalCost=Number(row.totalWithFeesEth);
+ const reference=Number(row.reference)>0?Number(row.reference):null;
+ const resaleFeePct=Number(settings.estimatedResaleFeesPct);
+ const expectedProceeds=reference===null?null:reference*quantity*(1-resaleFeePct/100);
+ const profit=expectedProceeds===null||!Number.isFinite(totalCost)?null:expectedProceeds-totalCost;
+ const roi=profit!==null&&totalCost>0?profit/totalCost*100:null;
+ return {
+  listing:{id:String(row.id),name:String(row.name),collection:row.collection,
+   contract:row.contract,tokenId:String(row.tokenId),quantity,tokenType:row.tokenType,
+   price:row.price,feeEstimateEth:row.feeEstimateEth,totalWithFeesEth:row.totalWithFeesEth,
+   reference:row.reference,discount:row.discount,netEdge:row.netEdge,sales30d:row.sales30d,
+   eligible:row.eligible===true,metadataResolved:row.metadataResolved===true,image:row.image||''},
+  lastScan,marketplaceUrl:marketplaceSearchUrl(row),
+  estimate:{resaleFeePct,expectedProceedsEth:expectedProceeds===null?null:round(expectedProceeds,10),
+   estimatedProfitEth:profit===null?null:round(profit,10),estimatedRoiPct:roi===null?null:round(roi,1)},
+  history:{count30d:sold30.length,count90d:comparable.length,
+   returned:Math.min(comparable.length,180),limited:comparable.length>180,
+   sales:comparable.sort((a,b)=>b.timestamp-a.timestamp).slice(0,180).map(s=>({
+    id:String(s.id),timestamp:s.timestamp,price:s.price,quantity:s.quantity,tokenId:String(s.tokenId)
+   }))}
+ };
+}
 /** Explain why genuine listings are not actionable; first blocking gate per NFT. */
 export function candidateDiagnostics(rows,settings){
  const counts={eligible:0,missingMetadata:0,insufficientComparableSales:0,priceOutsideLimits:0,discountTooSmall:0,netEdgeTooSmall:0,multiQuantity:0};
