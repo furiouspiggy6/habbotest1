@@ -43,3 +43,14 @@ test('Windows CI builds installer and native latest.yml manifest',()=>{
  assert.match(wf,/dist\/latest\.yml/);
  assert.doesNotMatch(legacy,/push:\s*\n\s*branches: \[main\]/);
 });
+
+test('desktop update check independently compares GitHub release rather than falsely claiming current',()=>{
+ const main=read('desktop/main.cjs'),app=read('public/app.js'),html=read('public/index.html');
+ assert.match(main,/fetchLatestRelease\(app.getVersion\(\)\)/);
+ assert.match(main,/if\(latestGitHubRelease\?\.newer\)/);
+ assert.match(main,/sendStatus\('manual-update'/);
+ assert.doesNotMatch(main,/on\('update-not-available',\(\)=>sendStatus\('current'/);
+ assert.match(main,/radar-open-latest-installer/);
+ assert.match(app,/nativeFallbackBtn/);
+ assert.match(html,/id="nativeFallbackBtn"/);
+});
