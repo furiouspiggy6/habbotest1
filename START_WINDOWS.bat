@@ -10,6 +10,8 @@ for /f %%V in ('node -p "process.versions.node.split('.')[0]" 2^>nul') do set "N
 if not defined NODE_MAJOR goto NEED_NODE
 if %NODE_MAJOR% LSS 24 goto OLD_NODE
 node -v
+for /f %%V in ('node -p "require('./package.json').version"') do echo Market Radar version: %%V
+echo Installation folder: %CD%
 echo Read-only Habbo NFT scanner ready (no SDK installation needed).
 echo.
 echo Opening dashboard at http://127.0.0.1:38571
