@@ -45,7 +45,7 @@ const editableAud=value=>value===null||value===undefined||!Number.isFinite(Numbe
 let data=null,selectedId=null,selectedKey=null,currentTab='market',days=30,currentChart=null,settingsLoaded=false,lastChartRequest=0;
 const ROWS_PER_PAGE=100;
 let pageIndex=0, cachedRows=[], cachedScanAt=null, audControlsReady=false, visibleRows=[];
-let cachedOpenSeaFeed=null;
+let cachedOpenSeaFeed=null,openSeaTestBusy=false;
 let toastTimer;
 let availableUpdate=null, updateBusy=false;
 function toast(message,error=false){const e=$('toast');e.textContent=message;e.className='toast'+(error?' error':'');e.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>e.hidden=true,4500);}
@@ -333,6 +333,28 @@ function renderTrades(){if(!data)return;
 }
 const audFields=['maximumPriceAud','dailyBudgetAud','minPriceAud'];
 const fields=['minDiscountPct','minSales30d','minNetEdgePct','estimatedResaleFeesPct','minEstimatedProfitAud','minimumFiatPrice','maxPurchasesPerDay','refreshSeconds','pagesPerCollection'];
+function renderOpenSeaConnection(){
+ if(!data)return;
+ const c=data.openSeaConnection??{};
+ const status=!data.openSeaKeyConfigured?'needs-key':
+  (c.loading&&(!c.checkedAt||c.status==='unchecked')?'checking':c.status??'unchecked');
+ const labels={
+  connected:'● CONNECTED',invalid:'● INVALID / EXPIRED',forbidden:'● ACCESS DENIED',
+  'rate-limited':'● RATE LIMITED',error:'● CONNECTION FAILED',
+  'needs-key':'● NO KEY SAVED',checking:'● CHECKING',unchecked:'● NOT VERIFIED'
+ };
+ const badge=$('openSeaKeyStatus');
+ badge.textContent=labels[status]??labels.error;
+ badge.dataset.status=status;
+ const lastCheck=c.checkedAt?'Last checked '+new Date(c.checkedAt).toLocaleString()+' · ':'';
+ $('openSeaConnectionDetails').textContent=!data.openSeaKeyConfigured
+  ?'Save an OpenSea API key first, then use Test OpenSea connection.'
+  :lastCheck+(c.message||'The saved key has not been verified yet. Click Test OpenSea connection.').trim()+
+   (c.loading?' Checking OpenSea now…':'')+' Tests use the saved key, not unsaved text in the field.';
+ const button=$('testOpenSeaBtn');
+ button.disabled=!data.openSeaKeyConfigured||Boolean(c.loading)||openSeaTestBusy;
+ button.textContent=openSeaTestBusy?'Testing…':'↻ Test OpenSea connection';
+}
 function fillSettings(){const s=data.settings;
  fields.forEach(k=>$(k).value=s[k]);
  $('openSeaApiKey').value='';
@@ -343,7 +365,7 @@ function fillSettings(){const s=data.settings;
  audFields.forEach(k=>{const val=data.audLimits?.[k];$(k).value=editableAud(val);$(k).placeholder=val===null||val===undefined?'Waiting for AUD quote':'AUD amount';});
  $('publishableKey').value=s.publishableKey||'';
  $('collectionOptions').innerHTML=s.collections.map(c=>`<label class="collection-label"><input data-contract="${htmlSafe(c.address)}" type="checkbox" ${c.enabled?'checked':''}><span>${htmlSafe(c.name)}</span></label>`).join('');}
-function renderReadiness(){if(!data)return;const checks=[['Live market connected',(data.stats?.successfulRequests??0)>0],['Dedicated wallet configured',data.hasDedicatedWallet],['Environment live-buy safeguard',data.liveEnvironmentEnabled],['Market data scanned',!!data.lastScan],['Completed sales fetched',data.stats.sales>0]];
+function renderReadiness(){if(!data)return;renderOpenSeaConnection();const checks=[['Live market connected',(data.stats?.successfulRequests??0)>0],['Dedicated wallet configured',data.hasDedicatedWallet],['Environment live-buy safeguard',data.liveEnvironmentEnabled],['Market data scanned',!!data.lastScan],['Completed sales fetched',data.stats.sales>0]];
  $('readiness').innerHTML=checks.map(([label,yes])=>`<p class="${yes?'yes':'no'}">${yes?'✓':'✕'} ${label}</p>`).join('');
  $('armBtn').disabled=data.armed;$('armBtn').textContent=data.armed?'LIVE BUYING ARMED':'Arm live autobuyer';$('armNotice').textContent=data.armed?'REAL MONEY BUYING IS ACTIVE. Use Disarm immediately to stop future orders.':'Live buying never arms on startup. Failed or uncertain trades are not retried automatically.';}
 function collectSettings(){const old=data.settings;return {...old,mode:'live',
@@ -384,8 +406,20 @@ for(const [id,ev] of [['searchInput','input'],['collectionFilter','change'],['si
  $('pageNext').addEventListener('click',()=>{pageIndex++;filterRows();});
 $('exportBtn').addEventListener('click',()=>{window.location.href='/api/export.csv';});
 document.querySelectorAll('.period').forEach(b=>b.addEventListener('click',()=>{days=Number(b.dataset.period);document.querySelectorAll('.period').forEach(x=>x.classList.toggle('active',x===b));if(currentChart)drawChart(currentChart,days);else void loadChart(true);}));
-$('settingsForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/settings',collectSettings());$('settingsNotice').textContent='Saved';$('openSeaApiKey').value='';$('clearOpenSeaKey').checked=false;toast('Strategy saved. Market rescan started.');await sync();}catch(err){$('settingsNotice').textContent='';toast(err.message,true);}});
-$('armBtn').addEventListener('click',async()=>{try{await api('/api/arm',{phrase:$('armPhrase').value});$('armPhrase').value='';toast('Real-money buying armed');await sync();}catch(e){toast(e.message,true);}});
+$('settingsForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/settings',collectSettings());$('settingsNotice').textContent='Saved';$('openSeaApiKey').value='';$('clearOpenSeaKey').checked=false;toast('Strategy saved. Market rescan started.');await sync();fillSettings();}catch(err){$('settingsNotice').textContent='';toast(err.message,true);}});
+$('testOpenSeaBtn').addEventListener('click',async()=>{
+ if(openSeaTestBusy)return;
+ openSeaTestBusy=true;
+ $('openSeaKeyStatus').textContent='● CHECKING';
+ $('openSeaKeyStatus').dataset.status='checking';
+ $('openSeaConnectionDetails').textContent='Testing the saved API key against the live OpenSea endpoint…';
+ $('testOpenSeaBtn').disabled=true;
+ $('testOpenSeaBtn').textContent='Testing…';
+ try{await api('/api/opensea/test',{});await sync();}
+ catch(err){$('openSeaConnectionDetails').textContent='Connection test could not complete: '+err.message;toast(err.message,true);}
+ finally{openSeaTestBusy=false;renderOpenSeaConnection();}
+});
+ $('armBtn').addEventListener('click',async()=>{try{await api('/api/arm',{phrase:$('armPhrase').value});$('armPhrase').value='';toast('Real-money buying armed');await sync();}catch(e){toast(e.message,true);}});
 $('disarmBtn').addEventListener('click',async()=>{try{await api('/api/disarm',{});toast('Live buying is disarmed');await sync();}catch(e){toast(e.message,true);}});
 
 async function checkForUpdate(){
