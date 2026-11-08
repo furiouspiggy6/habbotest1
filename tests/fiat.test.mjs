@@ -69,6 +69,7 @@ test('Windows desktop packages the public rate reader and settings control',asyn
  assert.doesNotMatch(html,/id="fiatCurrency"/);
  assert.ok(ui.includes("fiatCurrency:'AUD'"));
  assert.match(server,/effectiveAudSettings\(state.settings,fiatRates\)/);
- assert.match(server,/displayRows=applyFiatMinimum\(/);
+ assert.match(server,/const priced=applyFiatMinimum\(/);
+ assert.match(server,/scoreOpportunityRows\(priced,chartSales/);
  assert.match(server,/effectiveAudSettings\(state.settings,fiatRates\).available/);
 });
