@@ -99,3 +99,17 @@ The updater is Windows-specific. `npm install` runs during the update using your
 **Automatic updates are ON by default** and configurable under Strategy & settings → Software updates. On Windows, the app checks the latest `furiouspiggy6/habbotest1` GitHub release after startup and about every six hours. If a newer version is published, it downloads the ZIP directly, checks the accompanying SHA-256 checksum, starts the existing staged Windows updater, closes and restarts itself. No manual ZIP download or install confirmation is needed when this option is on. Checks are deferred during market scans, when live buying is armed, or while another update is running. Failures are shown in the app and retried later; no silent fallback to demo trading occurs.
 
 **Existing installations:** v1.0.5 already has the **Check for updates → Install verified update & restart** buttons, so use them *once* to install v1.0.6. After that updates are automatic unless disabled in settings. The `data/` folder and `.env` wallet configuration remain local and unchanged. The updater does not enable real-money NFT buying. Auto-installing software from GitHub trusts the repository's published releases and is not a substitute for reviewing code.
+
+## v1.0.7: Read-only REST market connection
+
+The Habbo NFT scanner no longer loads `@imtbl/sdk`. It uses public, read-only Immutable zkEVM REST endpoints:
+
+- `GET https://api.immutable.com/v1/chains/imtbl-zkevm-mainnet/orders/listings?status=ACTIVE&sell_item_contract_address=...`
+- The same endpoint with `status=FILLED` for order history.
+- `GET https://api.immutable.com/v1/chains/imtbl-zkevm-mainnet/collections/{address}/nfts/{tokenId}` for item metadata.
+
+Node 24+ includes the required `fetch` API. The Windows launcher does not run `npm install` or download hundreds of packages just to scan listings. An optional **publishable** Immutable Hub key can be added in the dashboard; do not enter secret keys or wallet seeds. Failed requests display their real HTTP status and short reason, rather than an inaccurate "SDK is not installed" error. No fallback to fictional demo data occurs in live mode.
+
+**Experimental live buying remains OFF by default.** Its existing code uses the separate Immutable transaction SDK and ethers, which are not installed by default in v1.0.7 and have not been validated for real-money execution. Leave live buying disabled while checking price-history quality, liquidity, marketplace coverage and security. Installing the optional trading dependencies is a separate step for future audited releases, not a requirement for market scanning.
+
+The first v1.0.7 scan and auto-updater still require internet access; the GitHub release installs through the app's automatic updater if v1.0.6 is installed and auto-update is enabled.
