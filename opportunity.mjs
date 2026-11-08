@@ -68,12 +68,13 @@ export function scoreOpportunityRows(rows,history,{now=Date.now(),partialCollect
   if(r.conservativeResaleEth!==undefined&&r.conservativeResaleEth!==null&&r.conservativeResaleEth<Number(r.reference)-1e-10)
    cautions.push('Current asking prices or recent sales cap the realistic resale estimate below the older 30-day median.');
   if(profitAud!==null&&profitAud<=0)cautions.push('Projected resale after fees and costs is break-even or a loss.');
+  if(r.bidOffersObserved&&r.bidExitProfitAud!==null&&r.bidExitProfitAud<=0)cautions.push('An exact-token live bid exists, but taking it at the current ask would not cover fees and costs.');
   if(trendPct!==null&&trendPct<=-10)cautions.push('Recent 7-day median is at least 10% below the 30-day median.');
   return {...r,opportunityScore,liquidity,confidence,observedActiveOffers:offers.length,
    observedCheaperOffers:cheaperOffers,observedNearPriceOffers:nearPriceOffers,
    verifiedSales7d:sales7.length,lastSaleAt:mostRecent,trendPct:trendPct===null?null:Number(trendPct.toFixed(1)),
    partialActiveCoverage:partialCoverage,scoreCautions:cautions,
-   buyOffersVerified:false};
+   buyOffersVerified:r.buyOffersVerified===true};
  });
 }
 
