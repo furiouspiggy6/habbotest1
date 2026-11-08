@@ -5,6 +5,8 @@ const percent=n=>Number.isFinite(Number(n))?Number(n).toFixed(1)+'%':'—';
 const relative=ms=>!ms?'Not scanned yet':(Date.now()-ms<10000?'Just now':`${Math.max(1,Math.floor((Date.now()-ms)/60000))}m ago`);
 const money=n=>n===null||n===undefined?'—':Number(n).toFixed(6);
 let data=null,selectedId=null,selectedKey=null,currentTab='market',days=30,currentChart=null,settingsLoaded=false,lastChartRequest=0;
+const ROWS_PER_PAGE=100;
+let pageIndex=0, cachedRows=[], cachedScanAt=null;
 let toastTimer;
 let availableUpdate=null, updateBusy=false;
 function toast(message,error=false){const e=$('toast');e.textContent=message;e.className='toast'+(error?' error':'');e.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>e.hidden=true,4500);}
@@ -15,7 +17,7 @@ function view(tab){currentTab=tab;for(const t of ['market','trades','settings'])
  if(tab==='trades')renderTrades();if(tab==='settings')renderReadiness();}
 function selectedRow(){return data?.rows?.find(r=>r.id===selectedId)??data?.rows?.[0]??null;}
 function renderBanner(){
- const hasListings=Number(data?.rows?.length)>0;
+ const hasListings=Number(data?.listingCount)>0;
  const connected=Number(data.stats?.successfulRequests)>0;
  $('modeBadge').textContent=hasListings?'● LIVE NFT LISTINGS':connected?'● LIVE CONNECTED · NO LISTINGS':'● LIVE NOT CONNECTED';
  $('updatedText').textContent=relative(data.lastScan);
@@ -27,13 +29,13 @@ function renderBanner(){
  b.querySelector('b').textContent=title;b.querySelector('span:not(.banner-icon)').textContent=copy;
  $('connectionPill').innerHTML='<span class="pulse-dot"></span> '+(data.scanning?'SCANNING':hasListings?'LIVE LISTINGS':connected?'CONNECTED · EMPTY':'LIVE OFFLINE');
 }
-function renderStats(){const rows=data.rows||[];$('statListings').textContent=rows.length;$('statOpportunities').textContent=rows.filter(x=>x.eligible).length;
+function renderStats(){$('statListings').textContent=data.listingCount??0;$('statOpportunities').textContent=data.candidateCount??0;
  $('statSales').textContent=data.stats?.sales??0;$('statSpend').textContent=fmt(data.liveSpentToday,4);
  $('riskLimit').textContent=fmt(data.settings.maximumPriceEth,4)+' WETH';$('riskDiscount').textContent=data.settings.minDiscountPct+'%';
  const canBuy=data.armed;$('autobuyIndicator').textContent=canBuy?'● LIVE ARMED':'● DISARMED';
  $('autobuyIndicator').style.color=canBuy?'#f87982':'#55e0bc';
  $('engineText').textContent=canBuy?'REAL MONEY purchasing is active. One eligible NFT at most per scan; it disarms on error or restart.':'Live market scanner is running. Real buying is OFF until separately enabled with a dedicated wallet and confirmation phrase.';
- $('coverageText').textContent=`${data.stats.rawOrders??0} real raw orders · ${data.stats.pages} pages · ${data.stats.failedRequests??0} failed requests · ${data.stats.truncated?'PARTIAL coverage':'page scan complete'} · ${data.warnings.length} warnings`;
+ $('coverageText').textContent=`${data.listingCount??0} LIVE offers across ${data.settings.collections.filter(c=>c.enabled).length} collections · up to ${data.settings.pagesPerCollection} pages per collection/status · ${data.stats.pages} pages read · ${data.stats.truncated?'PARTIAL coverage':'page scan complete'} · ${data.stats.failedRequests??0} failed requests`;
  const cv=data.stats.coverage,cd=data.stats.candidateDiagnostics;
  const coverage=cv?`Verified NFT identity: ${cv.activeResolved}/${cv.activeTotal} active · ${cv.salesResolved}/${cv.salesTotal} sold · ${cv.fetchedThisScan} resolved this scan, ${cv.failedThisScan} failed.`:'Metadata coverage not available yet.';
  const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside price limits; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
@@ -41,8 +43,15 @@ function renderStats(){const rows=data.rows||[];$('statListings').textContent=ro
 }
 function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),collection=$('collectionFilter').value,signal=$('signalFilter').value;
  const found=(data?.rows??[]).filter(x=>(!text||(`${x.name} ${x.tokenId} ${x.collection}`).toLowerCase().includes(text))&&(!collection||x.collection===collection)&&(signal!=='eligible'||x.eligible));
- $('scannerCount').textContent=data?.rows?.filter(x=>x.eligible).length??0;$('resultCount').textContent=found.length+' results';
- const limited=found.slice(0,250),body=$('marketRows');
+ $('scannerCount').textContent=data.candidateCount??0;
+ $('resultCount').textContent=found.length===data.listingCount?`${found.length} live listings`:`${found.length} matching of ${data.listingCount??0} live listings`;
+ const totalPages=Math.max(1,Math.ceil(found.length/ROWS_PER_PAGE));
+ pageIndex=Math.min(pageIndex,totalPages-1);
+ const start=pageIndex*ROWS_PER_PAGE;
+ const limited=found.slice(start,start+ROWS_PER_PAGE),body=$('marketRows');
+ $('pageSummary').textContent=found.length?`Showing ${start+1}–${start+limited.length} of ${found.length} · Page ${pageIndex+1}/${totalPages}`:'No matching listings';
+ $('pagePrev').disabled=pageIndex===0;
+ $('pageNext').disabled=pageIndex>=totalPages-1;
  body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}</div></td><td class="price">${fmt(r.price,6)}</td><td>${money(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td></tr>`).join('');
  body.querySelectorAll('tr').forEach(tr=>tr.addEventListener('click',()=>{selectedId=tr.dataset.order;renderMarket();void loadChart(true);}));
  $('emptyRows').hidden=limited.length>0;
@@ -96,7 +105,12 @@ function collectSettings(){const old=data.settings;return {...old,mode:'live',
   collections:old.collections.map(c=>({...c,enabled:document.querySelector(`[data-contract="${c.address}"]`)?.checked??false}))};}
 async function sync(){try{const incoming=await api('/api/state');
  if(data?.appVersion&&incoming.appVersion!==data.appVersion){window.location.reload();return;}
- data=incoming;
+ // The full order set is transferred only when a new scan completes.
+ if(cachedScanAt!==incoming.lastScan){
+  const full=await api('/api/listings');
+  if(full.lastScan===incoming.lastScan){cachedRows=full.rows;cachedScanAt=full.lastScan;}
+ }
+ data=incoming;data.rows=cachedRows;
  if($('appVersion'))$('appVersion').textContent='v'+data.appVersion;
  if($('updaterVersion'))$('updaterVersion').textContent='v'+data.appVersion;
  if($('autoInstallUpdates')&&!window.marketRadarDesktop)$('autoInstallUpdates').checked=data.updatePrefs?.autoInstall??true;
@@ -110,7 +124,9 @@ document.querySelectorAll('.nav').forEach(b=>b.addEventListener('click',()=>view
 $('bannerGo').addEventListener('click',()=>view('trades'));
 $('engineButton').addEventListener('click',()=>view('settings'));
 $('refreshBtn').addEventListener('click',async()=>{try{await api('/api/refresh',{});toast('Market refresh started');}catch(e){toast(e.message,true);}});
-$('searchInput').addEventListener('input',filterRows);$('collectionFilter').addEventListener('change',filterRows);$('signalFilter').addEventListener('change',filterRows);
+for(const [id,ev] of [['searchInput','input'],['collectionFilter','change'],['signalFilter','change']])$(id).addEventListener(ev,()=>{pageIndex=0;filterRows();});
+ $('pagePrev').addEventListener('click',()=>{if(pageIndex>0){pageIndex--;filterRows();}});
+ $('pageNext').addEventListener('click',()=>{pageIndex++;filterRows();});
 $('exportBtn').addEventListener('click',()=>{window.location.href='/api/export.csv';});
 document.querySelectorAll('.period').forEach(b=>b.addEventListener('click',()=>{days=Number(b.dataset.period);document.querySelectorAll('.period').forEach(x=>x.classList.toggle('active',x===b));if(currentChart)drawChart(currentChart,days);else void loadChart(true);}));
 $('settingsForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/settings',collectSettings());$('settingsNotice').textContent='Saved';toast('Strategy saved. Market rescan started.');await sync();}catch(err){$('settingsNotice').textContent='';toast(err.message,true);}});
