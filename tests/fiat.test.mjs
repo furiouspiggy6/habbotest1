@@ -20,7 +20,7 @@ test('invalid rates, HTTP failures and JSON errors do not produce usable quotes'
  await assert.rejects(()=>fetchFiatRates(async()=>new Response(JSON.stringify({ethereum:{aud:0,usd:5}}),{status:200})),/invalid ETH/);
 });
 test('default minimum purchase is 5 AUD, including buyer fees',()=>{
- const s=validateSettings(DEFAULT_SETTINGS);
+ const s=validateSettings({...DEFAULT_SETTINGS,minEstimatedProfitAud:0});
  assert.equal(s.minimumFiatPrice,5);
  assert.equal(s.fiatCurrency,'AUD');
  const now=1700000000000;
@@ -45,7 +45,7 @@ test('USD selection uses USD price and 0 fiat minimum disables the rule',()=>{
  const now=1700000000000,quote={aud:5000,usd:2500,fetchedAt:now};
  const usd=validateSettings({...DEFAULT_SETTINGS,fiatCurrency:'USD',minimumFiatPrice:5});
  assert.equal(applyFiatMinimum([{eligible:true,totalWithFeesEth:0.001}],usd,quote,now)[0].eligible,false);
- const off=validateSettings({...usd,minimumFiatPrice:0});
+ const off=validateSettings({...usd,minimumFiatPrice:0,minEstimatedProfitAud:0});
  assert.equal(applyFiatMinimum([{eligible:true,totalWithFeesEth:0.001}],off,null,now)[0].eligible,true);
  assert.throws(()=>validateSettings({...usd,fiatCurrency:'EUR'}),/fiatCurrency/);
 });
