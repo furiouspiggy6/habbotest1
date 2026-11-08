@@ -297,7 +297,7 @@ document.querySelectorAll('.nav').forEach(b=>b.addEventListener('click',()=>view
 $('bannerGo').addEventListener('click',()=>{view('market');$('scanDiagnostics').scrollIntoView({behavior:'smooth',block:'center'});});
 $('engineButton').addEventListener('click',()=>view('settings'));
 $('refreshBtn').addEventListener('click',async()=>{try{await api('/api/refresh',{});toast('Market refresh started');}catch(e){toast(e.message,true);}});
-for(const [id,ev] of [['searchInput','input'],['collectionFilter','change'],['signalFilter','change'],['cheapestOnly','change']])$(id).addEventListener(ev,()=>{pageIndex=0;filterRows();renderDetail();void loadChart(true);});
+for(const [id,ev] of [['searchInput','input'],['collectionFilter','change'],['signalFilter','change'],['cheapestOnly','change']])$(id).addEventListener(ev,()=>{pageIndex=0;const before=selectedId;filterRows();renderDetail();if(before!==selectedId)void loadChart(true);});
  $('pagePrev').addEventListener('click',()=>{if(pageIndex>0){pageIndex--;filterRows();}});
  $('pageNext').addEventListener('click',()=>{pageIndex++;filterRows();});
 $('exportBtn').addEventListener('click',()=>{window.location.href='/api/export.csv';});
