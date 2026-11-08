@@ -279,3 +279,16 @@ Newer Immutable orderbook listing responses carry **fees** rather than the depre
 
 **TokenTrove:** participating storefront liquidity normally flows into Immutable's shared orderbook; the app already scans that source. The linked TokenTrove website is an external manual reference, **not** an authenticated TokenTrove API scanner. **Furni.app:** the linked relic catalogue provides an additional external valuation reference. The app does not scrape Furni.app or automatically turn its indicative floor quotes into executable NFT orders; its read-only references are not included in candidates or auto-buys. More Immutable listings may still exist beyond the configured page depth. Therefore **full cross-market NFT coverage is not guaranteed** and individual listing/order verification is still required.
 
+
+## v2.0.17: verify the saved OpenSea API key in Settings
+
+Under **Strategy & Settings → Additional NFT marketplaces**, OpenSea now has a live connection indicator and a **Test OpenSea connection** button. The test makes one read-only request to the verified Ethereum Habbo Avatars listing endpoint using the locally saved key; it does not need to resave settings or send the key to GitHub.
+
+- **CONNECTED**: the live API returned a valid listings response, even when there are zero current orders.
+- **INVALID / EXPIRED**: OpenSea returned HTTP 401; replace the saved key.
+- **ACCESS DENIED**: OpenSea returned HTTP 403, which can indicate restricted endpoint permissions.
+- **RATE LIMITED**: OpenSea returned HTTP 429; stop repeated checks and retry after the service allows.
+- **CONNECTION FAILED**: network errors, service errors or unexpected response data.
+- **NO KEY SAVED / NOT VERIFIED / CHECKING**: setup or verification is incomplete.
+
+The indicator shows the time of its most recent result. Normal OpenSea scans refresh the key status automatically; manual testing is limited to one single-page read and has a short anti-spam cooldown. This test verifies present access, **not the future expiration date** of an instant seven-day API key. The API key is never included in the dashboard state or test response; it remains in local settings. OpenSea remains watch-only and cannot initiate Immutable purchases.
