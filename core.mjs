@@ -15,7 +15,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   estimatedResaleFeesPct:7.5, maximumPriceEth:0.015,
   minPriceEth:0.00005, minimumFiatPrice:5, fiatCurrency:'AUD', dailyBudgetEth:0.05, maxPurchasesPerDay:5,
   maximumPriceAud:null, dailyBudgetAud:null, minPriceAud:null,
-  collections:COLLECTIONS, publishableKey:''
+  collections:COLLECTIONS, publishableKey:'',openSeaApiKey:''
 });
 export const round=(v,d=8)=>Number(Number(v).toFixed(d));
 export const median=values=>{const a=values.filter(x=>Number.isFinite(x)&&x>0).sort((a,b)=>a-b); if(!a.length)return null;const p=Math.floor(a.length/2);return a.length%2?a[p]:(a[p-1]+a[p])/2;};
@@ -267,6 +267,7 @@ export function validateSettings(s){
   throw new Error('Daily AUD budget must be at least the maximum AUD purchase price');
  n.mode='live'; // Ignore obsolete persisted demo and paper-trading settings.
  n.publishableKey=String(s?.publishableKey??'').trim().slice(0,200);
+ n.openSeaApiKey=String(s?.openSeaApiKey??'').trim().slice(0,512);
  n.collections=COLLECTIONS.map(c=>({...c,enabled:(s?.collections??COLLECTIONS).some(x=>x.address===c.address&&x.enabled)}));
  if(!n.collections.some(x=>x.enabled))throw new Error('Choose at least one collection');return n;
 }
