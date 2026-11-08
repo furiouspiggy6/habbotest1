@@ -7,6 +7,7 @@ on:
       - 'build/**'
       - 'public/**'
       - 'core.mjs'
+      - 'opportunity.mjs'
       - 'market.mjs'
       - 'server.mjs'
       - 'trade.mjs'
