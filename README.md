@@ -217,3 +217,7 @@ The desktop app now verifies the latest published Windows release against GitHub
 ## v2.0.5: valid decimal trading settings
 
 The browser's built-in HTML `step` validation incorrectly rejected valid amounts such as `0.015` WETH per NFT and `0.05` WETH daily budget because the increments started at a non-zero minimum. WETH budgets/prices and fractional percentage fields now use `step="any"`; server-side numeric ranges and existing real-money buying safeguards are unchanged. Count and timing fields remain integers. A regression test covers the previously rejected default amounts and the full set of decimal controls.
+
+## v2.0.6: version-pinned automatic updates
+
+The app's old native GitHub update provider could report an older latest.yml version even after GitHub's independent Releases API confirmed a newer release. The app now takes the exact newest public Windows release confirmed by GitHub and instructs electron-updater to use a generic feed pinned to that **specific release tag**. The update manifest and installer therefore share the same release directory, rather than being discovered independently. Release assets, official host URLs, and downloaded update version are validated; real-money buying protections and the manual official-installer fallback remain. This change requires a one-time upgrade of existing installs to v2.0.6. The v2.0.5 decimal-input fix is included.
