@@ -45,6 +45,7 @@ const editableAud=value=>value===null||value===undefined||!Number.isFinite(Numbe
 let data=null,selectedId=null,selectedKey=null,currentTab='market',days=30,currentChart=null,settingsLoaded=false,lastChartRequest=0;
 const ROWS_PER_PAGE=100;
 let pageIndex=0, cachedRows=[], cachedScanAt=null, audControlsReady=false, visibleRows=[];
+let cachedOpenSeaFeed=null;
 let toastTimer;
 let availableUpdate=null, updateBusy=false;
 function toast(message,error=false){const e=$('toast');e.textContent=message;e.className='toast'+(error?' error':'');e.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>e.hidden=true,4500);}
@@ -165,7 +166,24 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
   }
  }
 }
-function renderMarket(){if(!data)return;renderBanner();renderStats();filterRows();renderDetail();}
+function renderOpenSea(){
+ if(!data)return;
+ const external=data.openSeaFeed??{rows:[],status:'needs-key'};
+ const rows=external.rows??[],meta=data.openSea??{};
+ $('openSeaCount').textContent=rows.length;
+ const status=meta.loading?'CHECKING':String(meta.status??'needs-key').toUpperCase().replaceAll('-',' ');
+ $('openSeaStatus').textContent=status;
+ $('openSeaHelp').textContent=rows.length
+  ?`${rows.length} verified Ethereum Habbo Avatar orders · ${external.pages??0} pages · last checked ${listingDate(external.checkedAt)}. ${external.truncated?'More pages exist. ':''}These are watch-only; estimated profit is not available without separate verified Ethereum sales history.`
+  :meta.loading?'Contacting OpenSea API for Ethereum Habbo Avatars…':
+   external.error||'Set an OpenSea API key in Strategy & Settings to scan Habbo Avatars.';
+ $('openSeaRows').innerHTML=rows.slice(0,200).map(r=>`<tr><td><b>${htmlSafe(r.name)}</b><div class="nft-sub">Ethereum · Token ${htmlSafe(r.tokenId)}</div></td>
+  <td class="price">${audCash(r.buyerTotalEth)}</td><td>${htmlSafe(Number(r.buyerTotalEth).toFixed(6))} ${htmlSafe(r.currency)}</td>
+  <td title="${htmlSafe(listingDate(r.listedAt))}">${htmlSafe(listingAge(r.listedAt))}</td>
+  <td title="${htmlSafe(listingDate(r.expiresAt))}">${htmlSafe(listingExpiry(r.expiresAt))}</td>
+  <td><a href="${htmlSafe(r.href)}" target="_blank" rel="noopener noreferrer">View NFT ↗</a></td></tr>`).join('');
+}
+function renderMarket(){if(!data)return;renderBanner();renderStats();filterRows();renderDetail();renderOpenSea();}
 function renderDetail(){const r=selectedRow();
  $('inspectSelectedBtn').disabled=!r;
  if(!r){$('chartTitle').textContent='Select an NFT';$('detailPrice').textContent='—';$('detailDiscount').textContent='—';$('detailSales').textContent='—';$('detailMedian').textContent='—';$('detailEdge').textContent='—';return;}
@@ -316,6 +334,11 @@ const audFields=['maximumPriceAud','dailyBudgetAud','minPriceAud'];
 const fields=['minDiscountPct','minSales30d','minNetEdgePct','estimatedResaleFeesPct','minEstimatedProfitAud','minimumFiatPrice','maxPurchasesPerDay','refreshSeconds','pagesPerCollection'];
 function fillSettings(){const s=data.settings;
  fields.forEach(k=>$(k).value=s[k]);
+ $('openSeaApiKey').value='';
+ $('openSeaApiKey').placeholder=data.openSeaKeyConfigured?'Saved — paste to replace':'Paste OpenSea API key to enable';
+ $('openSeaKeyHelp').textContent=data.openSeaKeyConfigured
+  ?'An OpenSea API key is saved locally. It is not returned in the dashboard status. Select Remove saved key to disable this feed.'
+  :'An OpenSea API key is needed for the verified Ethereum Habbo Avatar feed. Free read-only keys are available from OpenSea.';
  audFields.forEach(k=>{const val=data.audLimits?.[k];$(k).value=editableAud(val);$(k).placeholder=val===null||val===undefined?'Waiting for AUD quote':'AUD amount';});
  $('publishableKey').value=s.publishableKey||'';
  $('collectionOptions').innerHTML=s.collections.map(c=>`<label class="collection-label"><input data-contract="${htmlSafe(c.address)}" type="checkbox" ${c.enabled?'checked':''}><span>${htmlSafe(c.name)}</span></label>`).join('');}
@@ -326,6 +349,7 @@ function collectSettings(){const old=data.settings;return {...old,mode:'live',
   ...Object.fromEntries(fields.map(k=>[k,Number($(k).value)])),
   ...Object.fromEntries(audFields.map(k=>[k,$(k).value.trim()===''?NaN:Number($(k).value)])),
   fiatCurrency:'AUD',publishableKey:$('publishableKey').value,
+ openSeaApiKey:$('openSeaApiKey').value.trim(),clearOpenSeaKey:$('clearOpenSeaKey').checked,
   collections:old.collections.map(c=>({...c,enabled:document.querySelector(`[data-contract="${c.address}"]`)?.checked??false}))};}
 async function sync(){try{const incoming=await api('/api/state');
  if(data?.appVersion&&incoming.appVersion!==data.appVersion){window.location.reload();return;}
@@ -334,7 +358,11 @@ async function sync(){try{const incoming=await api('/api/state');
   const full=await api('/api/listings');
   if(full.lastScan===incoming.lastScan){cachedRows=full.rows;cachedScanAt=full.lastScan;}
  }
- data=incoming;data.rows=cachedRows;
+ if(!cachedOpenSeaFeed||cachedOpenSeaFeed.checkedAt!==incoming.openSea?.checkedAt){
+  try{cachedOpenSeaFeed=await api('/api/opensea/listings');}
+  catch{cachedOpenSeaFeed={status:'error',rows:[],pages:0,checkedAt:incoming.openSea?.checkedAt??0,error:'OpenSea status temporarily unavailable'};}
+ }
+ data=incoming;data.rows=cachedRows;data.openSeaFeed=cachedOpenSeaFeed;
  if($('appVersion'))$('appVersion').textContent='v'+data.appVersion;
  if($('updaterVersion'))$('updaterVersion').textContent='v'+data.appVersion;
  if($('autoInstallUpdates')&&!window.marketRadarDesktop)$('autoInstallUpdates').checked=data.updatePrefs?.autoInstall??true;
@@ -355,7 +383,7 @@ for(const [id,ev] of [['searchInput','input'],['collectionFilter','change'],['si
  $('pageNext').addEventListener('click',()=>{pageIndex++;filterRows();});
 $('exportBtn').addEventListener('click',()=>{window.location.href='/api/export.csv';});
 document.querySelectorAll('.period').forEach(b=>b.addEventListener('click',()=>{days=Number(b.dataset.period);document.querySelectorAll('.period').forEach(x=>x.classList.toggle('active',x===b));if(currentChart)drawChart(currentChart,days);else void loadChart(true);}));
-$('settingsForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/settings',collectSettings());$('settingsNotice').textContent='Saved';toast('Strategy saved. Market rescan started.');await sync();}catch(err){$('settingsNotice').textContent='';toast(err.message,true);}});
+$('settingsForm').addEventListener('submit',async e=>{e.preventDefault();try{await api('/api/settings',collectSettings());$('settingsNotice').textContent='Saved';$('openSeaApiKey').value='';$('clearOpenSeaKey').checked=false;toast('Strategy saved. Market rescan started.');await sync();}catch(err){$('settingsNotice').textContent='';toast(err.message,true);}});
 $('armBtn').addEventListener('click',async()=>{try{await api('/api/arm',{phrase:$('armPhrase').value});$('armPhrase').value='';toast('Real-money buying armed');await sync();}catch(e){toast(e.message,true);}});
 $('disarmBtn').addEventListener('click',async()=>{try{await api('/api/disarm',{});toast('Live buying is disarmed');await sync();}catch(e){toast(e.message,true);}});
 
