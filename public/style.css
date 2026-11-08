@@ -37,3 +37,10 @@ body.inspect-open{overflow:hidden}
 /* v2.0.10: Consistent fiat min-price controls and live conversion status. */
 .field-label select{display:block;width:100%;padding:11px;margin-top:8px;font-size:12px}
 #fiatRateText{line-height:1.55;max-width:700px}
+
+/* v2.0.14: display-only grouping toggle above the live offer table. */
+.listing-visibility{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 18px;padding:0 23px 12px;color:#a7bdcd;font-size:11px}
+.cheapest-toggle{display:inline-flex;align-items:center;gap:9px;cursor:pointer;font-size:11px;font-weight:750;color:#b2d5d5}
+.cheapest-toggle input{width:16px;height:16px;accent-color:var(--mint);cursor:pointer}
+.grouping-note{color:#7f96ab;font-size:10px}
+@media(max-width:690px){.listing-visibility{padding-left:14px;padding-right:14px}}
