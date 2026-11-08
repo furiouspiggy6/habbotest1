@@ -5,6 +5,7 @@ import {fileURLToPath} from 'node:url';
 import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing,normalizeOrder,fiatMinimumStatus,applyFiatMinimum,effectiveAudSettings,audLimitSummary} from './core.mjs';
 import {scanMarket,createReadClients} from './market.mjs';
 import {fetchFiatRates} from './fiat.mjs';
+import {fetchOpenSeaAvatarListings} from './opensea.mjs';
 import {parseStackFloor} from './market-floor.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
 import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
@@ -28,6 +29,20 @@ let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
 let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
 let liveArmed=false,liveBuyInFlight=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
 let fiatRates=null,fiatRateError='',nextFiatCheckAt=0;
+let openSeaFeed={status:'needs-key',rows:[],pages:0,truncated:false,error:'Set an OpenSea API key to enable separate Ethereum NFT listings.',checkedAt:0};
+let openSeaInProgress=false,nextOpenSeaCheckAt=0;
+async function refreshOpenSea(){
+ if(openSeaInProgress||Date.now()<nextOpenSeaCheckAt)return;
+ const key=state.settings.openSeaApiKey;
+ if(!key){
+  openSeaFeed={status:'needs-key',rows:[],pages:0,truncated:false,error:'Set an OpenSea API key in Settings to enable official Ethereum Habbo Avatar listings.',checkedAt:Date.now()};
+  nextOpenSeaCheckAt=Date.now()+10*60*1000;return;
+ }
+ openSeaInProgress=true;nextOpenSeaCheckAt=Date.now()+10*60*1000;
+ try{openSeaFeed=await fetchOpenSeaAvatarListings(key);}
+ catch(err){openSeaFeed={status:'error',rows:[],pages:0,truncated:false,error:'OpenSea scan failed: '+String(err?.message??err).slice(0,120),checkedAt:Date.now()};}
+ finally{openSeaInProgress=false;}
+}
 const orderVerificationCache=new Map();
 const stackFloorCache=new Map();
 async function verifyReadOnlyStackFloor(row){
@@ -118,7 +133,11 @@ function usedBudgetAud(trades,spot){
 function dayCount(trades){const d=today(Date.now());return trades.filter(t=>today(t.timestamp)===d && ['completed','pending'].includes(t.status)).length;}
 function safeSummary(){return {
  appVersion:LOCAL_VERSION,installDirectory:HERE,updateRepository:GITHUB_REPO,updatePrefs:state.updatePrefs,updateStatus,
- settings:state.settings,scanning,lastScan:scannedAt,now:Date.now(),armed:liveArmed,
+ settings:{...state.settings,openSeaApiKey:''},
+ openSeaKeyConfigured:Boolean(state.settings.openSeaApiKey),
+ openSea:{status:openSeaFeed.status,count:openSeaFeed.rows.length,checkedAt:openSeaFeed.checkedAt??0,
+  pages:openSeaFeed.pages,truncated:openSeaFeed.truncated,error:openSeaFeed.error||'',loading:openSeaInProgress},
+ scanning,lastScan:scannedAt,now:Date.now(),armed:liveArmed,
  hasDedicatedWallet:/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''),
  liveEnvironmentEnabled:process.env.HABBO_ENABLE_LIVE_BUYS==='YES',warnings,stats,
  fiatQuote:{...fiatMinimumStatus({...state.settings,fiatCurrency:'AUD'},fiatRates),source:fiatRates?.source??'CoinGecko ETH spot',error:fiatRateError},
@@ -169,6 +188,7 @@ async function scan(){if(scanning||updating)return;scanning=true;
   // A failed spot-price lookup must NOT discard real Immutable NFT listings.
   // Instead, the dollar floor fails closed and no new live buys qualify.
   await refreshFiatRates();
+  void refreshOpenSea(); // separate read-only feed; never blocks Immutable scanner
   const r=await scanMarket(state.settings,state.metadata,state.scanProgress);
   const {listings,filled}=r;
   warnings=r.warnings;
@@ -310,6 +330,8 @@ const server=http.createServer(async(req,res)=>{
   // Fetch the complete real order set on demand, rather than truncating at 800
   // or transferring thousands of rows on every 4-second status refresh.
   if(req.method==='GET'&&uri.pathname==='/api/listings')return send(res,200,{lastScan:scannedAt,total:displayRows.length,rows:displayRows});
+  if(req.method==='GET'&&uri.pathname==='/api/opensea/listings')
+   return send(res,200,{...openSeaFeed,rate:fiatMinimumStatus({...state.settings,fiatCurrency:'AUD'},fiatRates)});
   if(req.method==='GET'&&uri.pathname==='/api/listing-details'){
    const id=uri.searchParams.get('id');
    if(!id||id.length>250)return send(res,400,{error:'A valid live order ID is required.'});
@@ -375,11 +397,16 @@ const server=http.createServer(async(req,res)=>{
   }
   if(uri.pathname==='/api/settings'){
    if(updating)return send(res,409,{error:'Update installation is in progress.'});
-   const updated=validateSettings(body);
+   const updated=validateSettings({
+    ...body,
+    openSeaApiKey:body.clearOpenSeaKey?'':(String(body.openSeaApiKey??'').trim()||state.settings.openSeaApiKey)
+   });
    // Changing the trading floor requires explicit re-arming before money can move.
    if(state.settings.minimumFiatPrice!==updated.minimumFiatPrice||state.settings.fiatCurrency!==updated.fiatCurrency||
-       ['maximumPriceAud','dailyBudgetAud','minPriceAud'].some(k=>state.settings[k]!==updated[k]))liveArmed=false;
+       ['maximumPriceAud','dailyBudgetAud','minPriceAud','minEstimatedProfitAud'].some(k=>state.settings[k]!==updated[k]))liveArmed=false;
+   const keyChanged=state.settings.openSeaApiKey!==updated.openSeaApiKey;
    state.settings=updated;save();schedule();event('system','Live market settings saved');
+   if(keyChanged){nextOpenSeaCheckAt=0;openSeaFeed={status:'checking',rows:[],pages:0,truncated:false,checkedAt:0,error:''};void refreshOpenSea();}
    void scan();return send(res,200,{ok:true});
   }
   if(uri.pathname==='/api/refresh'){void scan();return send(res,200,{ok:true});}
