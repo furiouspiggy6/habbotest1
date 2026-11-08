@@ -145,7 +145,7 @@ $('installUpdateBtn').addEventListener('click',async()=>{
  if(data?.armed){toast('Disarm real-money autobuying first.',true);return;}
  if(!confirm(`Install v${availableUpdate.latest} from GitHub and restart Market Radar? Local settings and trades will be preserved. The app will close during installation.`))return;
  updateBusy=true;$('installUpdateBtn').disabled=true;$('checkUpdateBtn').disabled=true;
- $('updateDetails').textContent='Downloading release and checking SHA-256 integrity...';
+ $('updateDetails').textContent='Update queued. Waiting for any active NFT scan to finish, then verifying and installing. Please keep Market Radar running; do not click again.';
  try{
   const response=await api('/api/update/install',{confirm:'INSTALL VERIFIED UPDATE'});
   $('updateDetails').textContent=response.message+' The dashboard will reconnect after restart.';
