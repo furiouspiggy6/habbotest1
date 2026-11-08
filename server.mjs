@@ -2,8 +2,9 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing} from './core.mjs';
+import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing,fiatMinimumStatus,applyFiatMinimum} from './core.mjs';
 import {scanMarket} from './market.mjs';
+import {fetchFiatRates} from './fiat.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
 import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
 const HERE=path.dirname(fileURLToPath(import.meta.url));
@@ -25,6 +26,16 @@ let updating=false;
 let autoUpdateTimer=null,nextAutoUpdateAttempt=0;
 let updateStatus={phase:'idle',message:'Auto-update is enabled. Checks start after the app opens.',lastCheckedAt:null,availableVersion:null};
 let liveArmed=false,liveBuyInFlight=false,scanning=false,serverTimer=null,activeListings=[],displayRows=[],chartSales=[],warnings=[],scannedAt=0;
+let fiatRates=null,fiatRateError='',nextFiatCheckAt=0;
+async function refreshFiatRates(){
+ if(Date.now()<nextFiatCheckAt)return;
+ nextFiatCheckAt=Date.now()+5*60*1000; // one public price request every five minutes
+ try{fiatRates=await fetchFiatRates();fiatRateError='';}
+ catch(error){
+  fiatRateError=String(error?.message??error).slice(0,200);
+  nextFiatCheckAt=Date.now()+60*1000; // retry failures at most once a minute
+ }
+}
 let stats={pages:0,metadata:0,sales:0,truncated:0,rawOrders:0,failedRequests:0,successfulRequests:0,quoteTypes:[],rejected:{},diagnostics:[],coverage:null,candidateDiagnostics:null,historyPending:0,historyCompleted:0};
 function save(){const output={schemaVersion:9,settings:state.settings,updatePrefs:state.updatePrefs,metadata:state.metadata,scanProgress:state.scanProgress,historicalSales:state.historicalSales.slice(-16000),liveTrades:state.liveTrades.slice(-1000),events:state.events.slice(-400)};
  const tmp=storePath+'.tmp';fs.writeFileSync(tmp,JSON.stringify(output,null,2));fs.renameSync(tmp,storePath);}
@@ -37,6 +48,7 @@ function safeSummary(){return {
  settings:state.settings,scanning,lastScan:scannedAt,now:Date.now(),armed:liveArmed,
  hasDedicatedWallet:/^0x[a-fA-F0-9]{64}$/.test(process.env.HABBO_BOT_PRIVATE_KEY||''),
  liveEnvironmentEnabled:process.env.HABBO_ENABLE_LIVE_BUYS==='YES',warnings,stats,
+ fiatQuote:{...fiatMinimumStatus(state.settings,fiatRates),source:fiatRates?.source??'CoinGecko ETH spot',error:fiatRateError},
  listingCount:displayRows.length,candidateCount:displayRows.filter(x=>x.eligible).length,
  rows:displayRows.slice(0,50),events:state.events.slice(0,60),
  liveTrades:state.liveTrades.slice(-100).reverse(),
@@ -74,6 +86,9 @@ async function doAutoTrades(){
 }
 async function scan(){if(scanning||updating)return;scanning=true;
  try {
+  // A failed spot-price lookup must NOT discard real Immutable NFT listings.
+  // Instead, the dollar floor fails closed and no new live buys qualify.
+  await refreshFiatRates();
   const r=await scanMarket(state.settings,state.metadata,state.scanProgress);
   const {listings,filled}=r;
   warnings=r.warnings;
@@ -90,7 +105,11 @@ async function scan(){if(scanning||updating)return;scanning=true;
   state.historicalSales=hydrateNames([...salesById.values()],state.metadata).filter(x=>x.timestamp>=threshold).slice(-16000);
   chartSales=state.historicalSales;
   activeListings=listings;
-  displayRows=analyze(listings,chartSales,state.settings);
+  displayRows=applyFiatMinimum(analyze(listings,chartSales,state.settings),state.settings,fiatRates);
+  const fiatStatus=fiatMinimumStatus(state.settings,fiatRates);
+  if(fiatStatus.required&&!fiatStatus.available){
+   warnings.unshift('Dollar minimum cannot be checked: live ETH/AUD-USD conversion unavailable or older than 15 minutes. All purchase candidates are BLOCKED until a fresh quote is received.'+(fiatRateError?' '+fiatRateError:''));
+  }
   stats.candidateDiagnostics=candidateDiagnostics(displayRows,state.settings);
   stats.historicalSales=state.historicalSales.length;
   scannedAt=Date.now();
@@ -263,6 +282,8 @@ const server=http.createServer(async(req,res)=>{
   if(uri.pathname==='/api/settings'){
    if(updating)return send(res,409,{error:'Update installation is in progress.'});
    const updated=validateSettings(body);
+   // Changing the trading floor requires explicit re-arming before money can move.
+   if(state.settings.minimumFiatPrice!==updated.minimumFiatPrice||state.settings.fiatCurrency!==updated.fiatCurrency)liveArmed=false;
    state.settings=updated;save();schedule();event('system','Live market settings saved');
    void scan();return send(res,200,{ok:true});
   }
