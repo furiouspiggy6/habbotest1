@@ -11,6 +11,18 @@ const readHeaders=key=>({
 export function createReadClients(publishableKey='',fetcher=globalThis.fetch,apiBase=API_BASE){
  if(typeof fetcher!=='function')throw new Error('Node.js fetch API is unavailable (Node 24+ required).');
  const headers=readHeaders(publishableKey);
+ // All Immutable read endpoints in a scan share a small request-start interval.
+ // In particular, NFT metadata lookups must not burst dozens of requests per second.
+ let pacing=Promise.resolve(),nextStartAt=0;
+ async function pacedStart(){
+  const turn=pacing.then(async()=>{
+   const wait=Math.max(0,nextStartAt-Date.now());
+   if(wait)await sleep(wait);
+   nextStartAt=Date.now()+180;
+  });
+  pacing=turn.catch(()=>{});
+  await turn;
+ }
  async function read(path,query={}){
   const url=new URL(path,apiBase);
   for(const [name,value] of Object.entries(query))if(value!==undefined && value!==null && String(value)!=='')url.searchParams.set(name,String(value));
@@ -18,7 +30,10 @@ export function createReadClients(publishableKey='',fetcher=globalThis.fetch,api
   // Retry one transient HTTP failure or timeout. Never retry 401/403 or
   // other non-transient errors. Keep retry budget bounded for deep scans.
   for(let attempt=0;attempt<2;attempt++){
-   try {response=await fetcher(url.toString(),{method:'GET',headers,signal:AbortSignal.timeout(20000)});}
+   try {
+    await pacedStart();
+    response=await fetcher(url.toString(),{method:'GET',headers,signal:AbortSignal.timeout(20000)});
+   }
    catch(err){
     const detail=String(err?.message??err).slice(0,160);
     const isTimeout=err?.name==='TimeoutError'||(err?.name==='AbortError'&&/timeout|timed out|aborted due to timeout/i.test(detail))||/operation was aborted due to timeout/i.test(detail);
@@ -26,11 +41,19 @@ export function createReadClients(publishableKey='',fetcher=globalThis.fetch,api
     throw new Error(`Immutable API request failed (${url.pathname}): ${detail}.${isTimeout?' Request timed out after retry; earlier pages were preserved.':' Check internet, DNS or firewall.'}`);
    }
    if(attempt===0&&[429,500,502,503,504].includes(response.status)){
-    const retryAfter=Number(response.headers?.get?.('retry-after'));
-    const delay=Number.isFinite(retryAfter)&&retryAfter>0?Math.min(retryAfter*1000,3000):800;
-    try{await response.body?.cancel?.();}catch{}
-    await sleep(delay);
-    continue;
+    const rawRetryAfter=response.headers?.get?.('retry-after');
+    const numeric=rawRetryAfter===null?NaN:Number(rawRetryAfter);
+    const retryAfter=Number.isFinite(numeric)&&numeric>=0?numeric*1000:
+      rawRetryAfter?Date.parse(rawRetryAfter)-Date.now():NaN;
+    const suggested=Number.isFinite(retryAfter)?Math.max(0,retryAfter):
+      response.status===429?5000:1400;
+    // Respect a Retry-After longer than our bounded retry budget by failing
+    // this page rather than immediately trying again against the service.
+    if(suggested<=12000){
+     try{await response.body?.cancel?.();}catch{}
+     await sleep(suggested);
+     continue;
+    }
    }
    break;
   }
@@ -164,17 +187,34 @@ export async function resolveMetadata(client,orders,cache,limit=120){
  let cooldown=metadataRetry.get(cache);
  if(!cooldown){cooldown=new Map();metadataRetry.set(cache,cooldown);}
  const needed=items.filter(o=>retryReady(cache,metadataKey(o))).slice(0,limit);
- let ok=0,failed=0,index=0,firstError='';
- async function worker(){while(index<needed.length){const o=needed[index++],key=metadataKey(o);try{
-  const r=await client.getNFT({chainName,contractAddress:o.contract,tokenId:o.tokenId});
-  const m=metadataFromNFT(r);
-  if(m){cache[key]=m;cooldown.delete(key);ok++;}
-  else{failed++;cooldown.set(key,Date.now()+10*60*1000);}
-  }catch(err){failed++;cooldown.set(key,Date.now()+10*60*1000);if(!firstError)firstError=String(err?.message??err).slice(0,170);}await sleep(65);}}
- await Promise.all(Array.from({length:Math.min(4,needed.length)},worker));
- return {cache,ok,failed,attempted:needed.length,firstError,remaining:items.filter(o=>!cache[metadataKey(o)]).length};
+ let ok=0,failed=0,index=0,attempted=0,firstError='',rateLimited=false;
+ async function worker(){
+  while(index<needed.length&&!rateLimited){
+   const o=needed[index++],key=metadataKey(o);
+   attempted++;
+   try{
+    const r=await client.getNFT({chainName,contractAddress:o.contract,tokenId:o.tokenId});
+    const m=metadataFromNFT(r);
+    if(m){cache[key]=m;cooldown.delete(key);ok++;}
+    else{failed++;cooldown.set(key,Date.now()+10*60*1000);}
+   }catch(err){
+    failed++;
+    const message=String(err?.message??err).slice(0,170);
+    if(!firstError)firstError=message;
+    if(/\bHTTP 429\b|rate.limited|too many requests/i.test(message)){
+     // A quota error is shared across requests, not a permanently broken NFT.
+     // Stop requesting further metadata until the next regular scan and do not
+     // impose a ten-minute penalty on the affected token ID.
+     rateLimited=true;
+    }else cooldown.set(key,Date.now()+10*60*1000);
+   }
+   if(!rateLimited)await sleep(220);
+  }
+ }
+ await Promise.all(Array.from({length:Math.min(2,needed.length)},worker));
+ return {cache,ok,failed,attempted,rateLimited,firstError,remaining:items.filter(o=>!cache[metadataKey(o)]).length};
 }
-export async function scanMarket(settings,cache,progress={},clients=createReadClients(settings.publishableKey)){
+export async function scanMarket(settings,cache,progress={},clients=createReadClients(settings.publishableKey),historicalSales=[]){
  let listings=[],filled=[],warnings=[],pages=0,truncated=0,received=0,failedRequests=0,successfulRequests=0;
  const diagnostics=[];const rejected={};
  const quotes=new Set();let historyPending=0,historyCompleted=0;
@@ -234,8 +274,16 @@ export async function scanMarket(settings,cache,progress={},clients=createReadCl
   else if(received>0)warnings.unshift(`Immutable returned ${received} raw orders, but none passed the WETH NFT filters. Filter reasons: ${JSON.stringify(rejected).slice(0,250)}. Returned currencies: ${[...quotes].slice(0,6).join(', ')||'unknown'}.`);
   else warnings.unshift('Immutable returned zero orders for the selected collections. Check contracts, API key, and marketplace coverage.');
  }
- const prioritized=prioritizedMetadataOrders(listings,filled,cache,120);
+ // Reuse the on-disk historical sales backlog to resolve missing identities,
+ // instead of spending the metadata budget exclusively on this scan's fills.
+ // No cached order is ever inserted into the fresh ACTIVE listing feed.
+ const archived=Array.isArray(historicalSales)?historicalSales.filter(o=>
+  typeof o?.contract==='string'&&/^0x[a-f0-9]{40}$/i.test(o.contract)&&
+  /^[0-9]+$/.test(String(o.tokenId??''))&&
+  Number.isFinite(o.timestamp)&&o.timestamp>=Date.now()-93*86400000):[];
+ const prioritized=prioritizedMetadataOrders(listings,[...filled,...archived],cache,120);
  const meta=await resolveMetadata(clients.blockchainData,prioritized,cache,120);
+ if(meta.rateLimited)warnings.push('Immutable metadata HTTP 429: slowed/stopped optional NFT identity lookups for this scan. Verified listings already fetched are preserved; metadata indexing resumes on the next refresh.');
  listings=hydrateNames(listings,cache);filled=hydrateNames(filled,cache);
  const coverage={activeResolved:listings.filter(o=>o.metadataResolved).length,activeTotal:listings.length,
   salesResolved:filled.filter(o=>o.metadataResolved).length,salesTotal:filled.length,
