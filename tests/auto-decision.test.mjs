@@ -97,7 +97,8 @@ test('bundled runtime trading SDK and Ethers expose interfaces needed by the gat
  assert.equal(typeof pkg.dependencies['@imtbl/sdk'],'string');
  assert.equal(typeof pkg.dependencies.ethers,'string');
  assert.ok(pkg.build.files.includes('bid-market.mjs'));
- const sdk=await import('@imtbl/sdk');
+ const {createRequire}=await import('node:module');
+ const sdk=createRequire(import.meta.url)('@imtbl/sdk');
  const ethers=await import('ethers');
  assert.equal(typeof sdk.orderbook?.Orderbook,'function');
  assert.equal(typeof ethers.Wallet,'function');
