@@ -191,3 +191,20 @@ The initial scan depth is increased from **6 to 20 pages per collection and orde
 ## v2.0.2: immediate native updates during read-only market scans
 
 A finished desktop update download can now install without waiting for a large Immutable orderbook scan to finish. The application saves its last completed scan and closes the in-progress read-only network requests through the normal desktop restart. **Real-money buying must be disarmed**, and an in-flight real purchase always blocks automatic installation, even if disarmed during that purchase. Native downloaded updates retry installation every 15 seconds when buying becomes safe; network update checks remain on the six-hour schedule. If an older v2.0.0/v2.0.1 app already says *Update downloaded. Waiting for the scanner to finish*, close the window normally (not Task Manager): the NSIS auto-updater is configured to install the cached download on normal application exit.
+
+
+## v2.0.3: progressive historical sale indexing and honest active coverage
+
+Immutable's orderbook is cursor-paginated. A finite scan capped at 20 pages can have more
+ACTIVE offers and FILLED orders beyond that limit, and it would be wrong to claim full
+coverage. Market Radar now starts **every ACTIVE scan from the first page** so it does not
+show stale offers as current. For completed FILLED orders it fetches the first (newest)
+page on every scan, then spends up to four extra pages per collection advancing a saved
+continuation cursor. That backfills older sales **across refreshes instead of rereading
+the same 20 pages every time**, with local history retained between restarts.
+
+The dashboard distinguishes active-listing caps (which still trigger a truthful partial
+coverage warning) from older sale-history indexing progress. The Recorded Sales tile
+shows locally cached unique sale records rather than only the newest response. Real-money
+buying remains disarmed by default, and no stale ACTIVE offers are merged into the trade
+feed. Immutable API failures and incomplete coverage are never suppressed.
