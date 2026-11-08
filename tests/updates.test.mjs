@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {isNewer,versionParts,expectedAssetNames,parseChecksum,checkForUpdates,GITHUB_REPO,canAutoUpdate} from '../updates.mjs';
+import {isNewer,versionParts,expectedAssetNames,parseChecksum,checkForUpdates,GITHUB_REPO,canAutoUpdate,canAutoCheck} from '../updates.mjs';
 
 test('version comparison handles major, minor and patch',()=>{
  assert.equal(isNewer('v1.0.3','1.0.2'),true);
@@ -17,7 +17,7 @@ test('checksum must match filename and digest',()=>{
  assert.throws(()=>parseChecksum(`${hash}  wrong.zip\n`,names.zip));
 });
 test('release must belong to intended GitHub repository and have both assets',async()=>{
- const version='1.0.9';const names=expectedAssetNames(version);
+ const version='1.1.0';const names=expectedAssetNames(version);
  const item=name=>({name,size:123,browser_download_url:`https://github.com/${GITHUB_REPO}/releases/download/v${version}/${name}`});
  const rel={tag_name:'v'+version,assets:[item(names.zip),item(names.checksum)]};
  const result=await checkForUpdates(async()=>({ok:true,status:200,json:async()=>rel}));
@@ -33,4 +33,14 @@ test('automatic updates only run on Windows when enabled and no scan or real buy
  assert.equal(canAutoUpdate({...base,enabled:false}),false);
  assert.equal(canAutoUpdate({...base,platform:'linux'}),false);
  assert.equal(canAutoUpdate({...base,nextAttemptAt:1001}),false);
+});
+
+
+test('auto-update checks continue during long scans without interrupting trading',()=>{
+ const base={enabled:true,platform:'win32',armed:false,scanning:true,updating:false,now:200,nextAttemptAt:0};
+ assert.equal(canAutoCheck(base),true,'read-only GitHub check is allowed while scanning');
+ assert.equal(canAutoUpdate(base),false,'installation is still unsafe while scanning');
+ assert.equal(canAutoCheck({...base,armed:true}),false);
+ assert.equal(canAutoCheck({...base,updating:true}),false);
+ assert.equal(canAutoCheck({...base,nextAttemptAt:201}),false);
 });
