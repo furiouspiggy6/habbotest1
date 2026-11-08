@@ -44,3 +44,21 @@ test('auto-update checks continue during long scans without interrupting trading
  assert.equal(canAutoCheck({...base,updating:true}),false);
  assert.equal(canAutoCheck({...base,nextAttemptAt:201}),false);
 });
+
+
+test('Windows updater must verify the replacement process is online and preserve rollback behavior',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const {fileURLToPath}=await import('node:url');
+ const {resolve,dirname}=await import('node:path');
+ const root=resolve(dirname(fileURLToPath(import.meta.url)),'..');
+ const installer=readFileSync(resolve(root,'UPDATE_WINDOWS.ps1'),'utf8');
+ const recovery=readFileSync(resolve(root,'REPAIR_WINDOWS.ps1'),'utf8');
+ assert.match(installer,/function Launch-AppVerified/);
+ assert.match(installer,/Get-AppVersion/);
+ assert.match(installer,/Startup verified/);
+ assert.match(installer,/Rolling back to previous version/);
+ assert.match(installer,/last-start.stderr.log/);
+ assert.doesNotMatch(installer,/Start-Process -FilePath .+cmd\.exe/);
+ assert.match(recovery,/Verified Market Radar/);
+ assert.match(recovery,/node\.exe/);
+});
