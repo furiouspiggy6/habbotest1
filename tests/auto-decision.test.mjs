@@ -91,3 +91,14 @@ test('dashboard makes unattended decisions primary while preserving explicit liv
  assert.match(server,/const withBids=addBidEvidence\(/);
  assert.match(server,/if\(liveArmed\)/);
 });
+
+test('bundled runtime trading SDK and Ethers expose interfaces needed by the gated wallet executor',async()=>{
+ const pkg=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
+ assert.equal(typeof pkg.dependencies['@imtbl/sdk'],'string');
+ assert.equal(typeof pkg.dependencies.ethers,'string');
+ assert.ok(pkg.build.files.includes('bid-market.mjs'));
+ const sdk=await import('@imtbl/sdk');
+ const ethers=await import('ethers');
+ assert.equal(typeof sdk.orderbook?.Orderbook,'function');
+ assert.equal(typeof ethers.Wallet,'function');
+});
