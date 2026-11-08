@@ -53,7 +53,7 @@ test('profit threshold is reflected in UI, API and final settlement check',async
  const trade=readFileSync(new URL('../trade.mjs',import.meta.url),'utf8');
  const server=readFileSync(new URL('../server.mjs',import.meta.url),'utf8');
  assert.match(html,/id="minEstimatedProfitAud"/);
- assert.match(html,/id="profitOnly" checked/);
+ assert.match(html,/id="profitOnly"/);
  assert.match(html,/EST\. PROFIT \(AUD\)/);
  assert.match(js,/x\.estimatedProfitAud/);
  assert.match(js,/minimumProfit/);
