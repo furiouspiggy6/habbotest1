@@ -75,3 +75,8 @@ body.inspect-open{overflow:hidden}
 .score-confidence{display:block;margin-top:5px;color:#8599ab;font-size:9px;white-space:nowrap}
 #deepScanStatus{font-size:11px;line-height:1.5;margin:0}
 #runDeepScanBtn:disabled{opacity:.45;cursor:default;transform:none}
+
+/* v2.0.21: unattended decision dashboard */
+.auto-bot-decision{padding:12px 17px;border-bottom:1px solid #233747;background:#111f2a;display:grid;gap:4px}
+.auto-bot-decision b{font-size:12px;letter-spacing:.1px;color:#8ce8d7}
+.auto-bot-decision span{font-size:11px;line-height:1.55;color:#a6b8c8}
