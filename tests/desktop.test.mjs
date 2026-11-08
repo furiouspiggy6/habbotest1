@@ -16,14 +16,20 @@ test('desktop app has an isolated renderer and uses a local-only backend',()=>{
  assert.match(main,/127\.0\.0\.1/);
  assert.match(main,/app\.requestSingleInstanceLock/);
 });
-test('desktop updates wait for safe scanner checkpoint and never invoke legacy ZIP installer',()=>{
+test('desktop updates interrupt read-only scans but never interrupt a live wallet transaction',()=>{
  const main=read('desktop/main.cjs');
  const server=read('server.mjs');
  assert.match(main,/autoUpdater\.checkForUpdates\(/);
  assert.match(main,/autoUpdater\.quitAndInstall\(/);
  assert.match(main,/serverControl\.pauseForDesktopUpdate\(/);
+ assert.match(main,/autoUpdater\.autoInstallOnAppQuit=true/);
  assert.match(server,/export async function pauseForDesktopUpdate/);
- assert.match(server,/if\(liveArmed\|\|updating\)return false/);
+ const gate=server.split('export async function pauseForDesktopUpdate()')[1].split('export function resumeAfterDesktopUpdate')[0];
+ assert.match(gate,/if\(liveArmed\|\|liveBuyInFlight\|\|updating\)return false/);
+ assert.doesNotMatch(gate,/while\(scanning/);
+ assert.doesNotMatch(gate,/await new Promise/);
+ assert.match(server,/liveBuyInFlight=true/);
+ assert.match(server,/finally\{liveBuyInFlight=false;save\(\);\}/);
  assert.match(server,/HABBO_DESKTOP_APP==='1'/);
 });
 test('Windows CI builds installer and native latest.yml manifest',()=>{
