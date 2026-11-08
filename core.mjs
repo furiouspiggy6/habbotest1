@@ -64,7 +64,13 @@ export function normalizeOrder(input,collection,status='ACTIVE'){
  const amount=rawValue(buy),qty=rawValue(sell)??'1';
  const total=weiToEth(amount),quantity=Number(qty);
  if(!Number.isFinite(total)||total<=0||!Number.isSafeInteger(quantity)||quantity<=0)return null;
- const fees=(raw.buyer_fees??raw.buyerFees??[]).reduce((a,fee)=>a+weiToEth(fee.amount??'0'),0);
+ // Immutable v1 now returns fees[] (buyer_fees is deprecated). All listed
+ // royalty/protocol/marketplace fees are paid by the taker at settlement.
+ // Do not add old and new arrays together if both are present.
+ const feeEntries=Array.isArray(raw.fees)?raw.fees:
+  Array.isArray(raw.buyer_fees)?raw.buyer_fees:
+  Array.isArray(raw.buyerFees)?raw.buyerFees:[];
+ const fees=feeEntries.reduce((a,fee)=>a+weiToEth(fee.amount??'0'),0);
  if(!Number.isFinite(fees)||fees<0)return null;
  const date=status==='FILLED'?(raw.updated_at??raw.update_time??raw.updatedAt??raw.created_at??raw.create_time):(raw.created_at??raw.create_time??raw.createdAt);
  const when=safeTime(date);
