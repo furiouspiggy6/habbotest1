@@ -2,7 +2,7 @@ import http from 'node:http';
 import fs from 'node:fs';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
-import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage} from './core.mjs';
+import {analyze,candles,DEFAULT_SETTINGS,validateSettings,hydrateNames,candidateDiagnostics,upgradeLegacyScanCoverage,inspectListing} from './core.mjs';
 import {scanMarket} from './market.mjs';
 import {executeLiveBuy,setAllowedContracts} from './trade.mjs';
 import {LOCAL_VERSION,GITHUB_REPO,checkForUpdates,prepareUpdate,startWindowsUpdate,canAutoCheck} from './updates.mjs';
@@ -206,6 +206,13 @@ const server=http.createServer(async(req,res)=>{
   // Fetch the complete real order set on demand, rather than truncating at 800
   // or transferring thousands of rows on every 4-second status refresh.
   if(req.method==='GET'&&uri.pathname==='/api/listings')return send(res,200,{lastScan:scannedAt,total:displayRows.length,rows:displayRows});
+  if(req.method==='GET'&&uri.pathname==='/api/listing-details'){
+   const id=uri.searchParams.get('id');
+   if(!id||id.length>250)return send(res,400,{error:'A valid live order ID is required.'});
+   const listing=displayRows.find(row=>row.id===id);
+   if(!listing)return send(res,404,{error:'This listing is no longer in the most recent live scan. Refresh and inspect again.'});
+   return send(res,200,inspectListing(listing,state.historicalSales,state.settings,scannedAt));
+  }
   if(req.method==='GET'&&uri.pathname==='/api/update/check'){
    if(process.env.HABBO_DESKTOP_APP==='1')return send(res,410,{error:'Use the desktop software update button instead.'});
    try {lastCheckedUpdate=await checkForUpdates();return send(res,200,lastCheckedUpdate);} 
