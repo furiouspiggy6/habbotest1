@@ -68,17 +68,109 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
  $('pageSummary').textContent=found.length?`Showing ${start+1}–${start+limited.length} of ${found.length} · Page ${pageIndex+1}/${totalPages}`:'No matching listings';
  $('pagePrev').disabled=pageIndex===0;
  $('pageNext').disabled=pageIndex>=totalPages-1;
- body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}</div></td><td class="price">${fmt(r.price,6)}</td><td>${money(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td></tr>`).join('');
+ body.innerHTML=limited.map(r=>`<tr class="${r.id===selectedId?'selected':''}" data-order="${htmlSafe(r.id)}"><td><div class="nft-name">${htmlSafe(r.name)}</div><div class="nft-sub">${htmlSafe(r.collection)} · token ${htmlSafe(r.tokenId)}</div></td><td class="price">${fmt(r.price,6)}</td><td>${money(r.reference)}</td><td class="${r.discount>=0?'positive':'neutral'}">${r.discount==null?'—':(r.discount>0?'-':'')+percent(Math.abs(r.discount))}</td><td>${r.sales30d}</td><td><span class="signal ${r.eligible?'buy':''}">${r.eligible?'● CANDIDATE':r.reference?'WATCH':'NO HISTORY'}</span></td><td><button class="row-inspect" type="button" data-inspect-order="${htmlSafe(r.id)}">Inspect →</button></td></tr>`).join('');
  body.querySelectorAll('tr').forEach(tr=>tr.addEventListener('click',()=>{selectedId=tr.dataset.order;renderMarket();void loadChart(true);}));
+ body.querySelectorAll('.row-inspect').forEach(btn=>btn.addEventListener('click',event=>{
+  event.stopPropagation();selectedId=btn.dataset.inspectOrder;
+  renderMarket();void loadChart(true);void openInspect(selectedId);
+ }));
  $('emptyRows').hidden=limited.length>0;
 }
 function renderMarket(){if(!data)return;renderBanner();renderStats();filterRows();renderDetail();}
 function renderDetail(){const r=selectedRow();
+ $('inspectSelectedBtn').disabled=!r;
  if(!r){$('chartTitle').textContent='Select an NFT';$('detailPrice').textContent='—';$('detailDiscount').textContent='—';$('detailSales').textContent='—';$('detailMedian').textContent='—';$('detailEdge').textContent='—';return;}
  $('chartTitle').textContent=r.name;$('detailPrice').textContent=fmt(r.price,6);$('detailDiscount').textContent=r.discount===null?'Unpriced':(r.discount>0?'↓ ':'↑ ')+percent(Math.abs(r.discount));
  $('detailDiscount').style.color=r.discount>0?'#55e0bc':'#8497a9';$('detailSales').textContent=r.sales30d;
  $('detailMedian').textContent=money(r.reference);$('detailEdge').textContent=percent(r.netEdge);
 }
+// Deep inspection uses a snapshot of the live order and ONLY cached, verified filled orders.
+let inspectedOrderId=null;
+let inspectReturnFocus=null;
+function inspectPrice(value){return value===null||value===undefined||!Number.isFinite(Number(value))?'—':Number(value).toFixed(8)+' WETH';}
+function inspectPct(value){return value===null||value===undefined||!Number.isFinite(Number(value))?'—':Number(value).toFixed(1)+'%';}
+function inspectDate(ms){const d=new Date(Number(ms));return Number.isFinite(d.getTime())?d.toLocaleString():'Unknown';}
+function inspectPair(label,value){return `<div class="inspect-pair"><span>${htmlSafe(label)}</span><strong>${htmlSafe(value)}</strong></div>`;}
+function renderInspection(info){
+ const r=info.listing,estimate=info.estimate,h=info.history;
+ const safeMarketplace=(()=>{try{const u=new URL(info.marketplaceUrl);return u.protocol==='https:'&&u.hostname==='tokentrove.com'?u.href:null;}catch{return null;}})();
+ $('inspectTitle').textContent=r.name;
+ const img=typeof r.image==='string'&&/^https:\/\//.test(r.image)&&r.image.length<2048?`<img src="${htmlSafe(r.image)}" alt="${htmlSafe(r.name)}" referrerpolicy="no-referrer">`:'';
+ const metric=(label,value,cls='')=>`<div class="inspect-metric"><small>${htmlSafe(label)}</small><b class="${cls}">${htmlSafe(value)}</b></div>`;
+ const enough=h.count30d>=3;
+ const historyRows=h.sales.map(s=>`<tr><td>${htmlSafe(inspectDate(s.timestamp))}</td><td>${htmlSafe(inspectPrice(s.price))}</td><td>${htmlSafe(s.tokenId)}</td><td>${htmlSafe(String(s.id))}</td></tr>`).join('');
+ const totalCost=Number(r.totalWithFeesEth);
+ const ref=r.reference===null?'Not enough data':inspectPrice(r.reference);
+ const estimateProfit=estimate.estimatedProfitEth;
+ const profitClass=estimateProfit===null?'':estimateProfit>=0?'good':'bad';
+ const qualified=r.eligible?'● BUY-QUALIFIED CANDIDATE':'● WATCH / NOT QUALIFIED';
+ $('inspectStatus').textContent='';
+ $('inspectContent').innerHTML=`
+  <div class="inspect-intro">${img}<div><h3>${htmlSafe(r.name)}</h3><small>${htmlSafe(r.collection)} · ${htmlSafe(r.tokenType||'NFT')} · Token #${htmlSafe(r.tokenId)}</small><div><span class="inspect-signal ${r.eligible?'':'watch'}">${qualified}</span></div></div></div>
+  <div class="inspect-metrics">
+   ${metric('Listed unit price',inspectPrice(r.price))}
+   ${metric('30D reference / unit',ref)}
+   ${metric('Discount vs reference',inspectPct(r.discount),r.discount>=0?'good':'bad')}
+   ${metric('Estimated net profit',inspectPrice(estimateProfit),profitClass)}
+  </div>
+  <div class="inspect-rows">
+   ${inspectPair('Quantity',String(r.quantity))}
+   ${inspectPair('Buyer fees shown by Immutable',inspectPrice(r.feeEstimateEth))}
+   ${inspectPair('Total purchase cost incl. buyer fees',inspectPrice(r.totalWithFeesEth))}
+   ${inspectPair('Assumed resale fee',inspectPct(estimate.resaleFeePct))}
+   ${inspectPair('Est. resale proceeds after fee',inspectPrice(estimate.expectedProceedsEth))}
+   ${inspectPair('Est. return on purchase cost',inspectPct(estimate.estimatedRoiPct))}
+   ${inspectPair('Completed comparable sales in 30D',String(h.count30d))}
+   ${inspectPair('Completed comparable sales in 90D',String(h.count90d))}
+   ${inspectPair('Last completed scan',inspectDate(info.lastScan))}
+   ${inspectPair('Listing price filter',r.eligible?'Qualified':'Review strategy limits')}
+  </div>
+  <h3 class="inspect-section-title">Comparable completed sales — last 90 days</h3>
+  <p class="inspect-meta">${h.count30d} within 30 days; ${h.count90d} within 90 days. These are other orders with matching verified collectible identity, not necessarily sales of this token ID.</p>
+  <div class="inspect-evidence">${h.sales.length?`<table><thead><tr><th>Immutable order updated</th><th>Sold unit price</th><th>Token ID</th><th>Order ID</th></tr></thead><tbody>${historyRows}</tbody></table>`:'<div class="inspect-status">No verified matching FILLED records in the last 90 days.</div>'}</div>
+  ${h.limited?`<p class="inspect-meta">Showing the newest ${h.returned} of ${h.count90d} verified matches.</p>`:''}
+  <div class="inspect-actions">
+   ${safeMarketplace?`<a class="button accent-btn" href="${htmlSafe(safeMarketplace)}" target="_blank" rel="noopener noreferrer">Search on TokenTrove ↗</a>`:''}
+   <button class="button ghost inspect-copy" type="button" data-copy="${htmlSafe(r.tokenId)}">Copy token ID</button>
+   <button class="button ghost inspect-copy" type="button" data-copy="${htmlSafe(r.id)}">Copy order ID</button>
+  </div>
+  <div class="inspect-warning">Estimates assume resale at the 30-day reference price and subtract the configured ${htmlSafe(inspectPct(estimate.resaleFeePct))} resale fee and the listing's observed buyer fees. They exclude gas, slippage, future price changes, additional marketplace charges, and time-to-sell. A buyer is not guaranteed. Immutable FILLED order update timestamps may differ from actual settlement times. Data and live order availability can change after the last scan. Always confirm the offer on TokenTrove.</div>
+  <div class="inspect-meta">Collection contract: ${htmlSafe(r.contract)}<br>Immutable order ID: ${htmlSafe(r.id)}<br>The TokenTrove link opens a collection search, not a verified deep link to this exact order.</div>`;
+ $('inspectContent').querySelectorAll('.inspect-copy').forEach(btn=>btn.addEventListener('click',async()=>{
+  try{await navigator.clipboard.writeText(btn.dataset.copy);toast('Copied to clipboard');}
+  catch{toast('Could not copy automatically. Select the ID shown in the inspection details.',true);}
+ }));
+}
+async function openInspect(orderId){
+ if(!orderId)return;
+ inspectReturnFocus=document.activeElement;
+ inspectedOrderId=orderId;
+ $('inspectOverlay').hidden=false;document.body.classList.add('inspect-open');
+ $('inspectStatus').textContent='Loading actual listing and recorded sales…';
+ $('inspectContent').replaceChildren();$('inspectTitle').textContent='Inspect collectible';
+ $('inspectClose').focus();
+ try{
+  const result=await api('/api/listing-details?id='+encodeURIComponent(orderId));
+  if(inspectedOrderId===orderId)renderInspection(result);
+ }catch(error){if(inspectedOrderId===orderId){$('inspectStatus').textContent='Unable to inspect this order: '+error.message;$('inspectContent').replaceChildren();}}
+}
+function closeInspect(){
+ inspectedOrderId=null;$('inspectOverlay').hidden=true;document.body.classList.remove('inspect-open');
+ if(inspectReturnFocus?.isConnected)inspectReturnFocus.focus();else $('inspectSelectedBtn').focus();
+}
+$('inspectSelectedBtn').addEventListener('click',()=>{const row=selectedRow();if(row)void openInspect(row.id);});
+$('inspectClose').addEventListener('click',closeInspect);
+$('inspectOverlay').addEventListener('click',event=>{if(event.target===$('inspectOverlay'))closeInspect();});
+document.addEventListener('keydown',event=>{
+ if($('inspectOverlay').hidden)return;
+ if(event.key==='Escape'){event.preventDefault();closeInspect();return;}
+ if(event.key==='Tab'){
+  const controls=[...$('inspectDialog').querySelectorAll('button:not(:disabled),a[href]')];
+  if(!controls.length){event.preventDefault();return;}
+  if(event.shiftKey&&document.activeElement===controls[0]){event.preventDefault();controls.at(-1).focus();}
+  else if(!event.shiftKey&&document.activeElement===controls.at(-1)){event.preventDefault();controls[0].focus();}
+ }
+});
 function makeSvg(tag,attrs={},txt){const el=document.createElementNS('http://www.w3.org/2000/svg',tag);Object.entries(attrs).forEach(([k,v])=>el.setAttribute(k,String(v)));if(txt!==undefined)el.textContent=String(txt);return el;}
 function drawChart(items,daysRange){const svg=$('priceChart');svg.innerHTML='';
  const now=Date.now(),filtered=items.filter(i=>new Date(i.date+'T23:59:59Z').getTime()>=now-daysRange*86400000).slice(-95);
