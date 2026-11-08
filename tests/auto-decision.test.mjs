@@ -42,7 +42,7 @@ test('direct bids are informational and do not automatically approve purchases',
  assert.equal(priced[0].eligible,false);
  assert.equal(priced[1].eligible,true);
  const scored=scoreOpportunityRows(priced,[],{now:NOW});
- assert.equal(scored[0].buyOffersVerified,true);
+ assert.equal(scored[0].buyOffersVerified,false,'An indexed bid is not proof of funded executable liquidity');
 });
 test('automated decisions never turn an unqualified watch into a buy',()=>{
  const settings={minSales30d:3,minEstimatedProfitAud:2};
