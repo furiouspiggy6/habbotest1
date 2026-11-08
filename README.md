@@ -8,9 +8,17 @@ Local dashboard for **Habbo NFT collections on Immutable zkEVM only**. Tracks li
 2. Install **Node.js 24 LTS or newer** from https://nodejs.org/en/download. The app checks your installed version before attempting to load the Immutable SDK.
 3. Double-click `START_WINDOWS.bat`. On first launch it downloads the official `@imtbl/sdk` and `ethers` dependencies using `npm install`. You need internet for this and for live data.
 4. Your browser opens `http://127.0.0.1:38571`. If it opens too soon, refresh the page.
-5. Initially you're in **Demo / Paper** mode, with clearly marked invented NFT examples. Go to **Strategy & settings → Live market data** to retrieve real data, then save. **Real-money buying remains OFF.**
+5. The dashboard starts in **Live market data** mode, scanning real Immutable zkEVM NFT orders. The initial connection may fail if the SDK needs a valid Immutable Hub publishable key; see the scan diagnostics below the listing table. **Real-money buying remains OFF.**
 
 Run `npm test` from the extracted folder to check the pure-price and risk tests.
+
+## v1.0.4: live-market scanner first
+
+The original v1.0.3 intentionally started with eight synthetic NFT listings. On the first v1.0.4 launch, existing demo-only settings are migrated to live scanning once; you can still choose Demo in settings later. New installations default to Live. The dashboard shows orderbook request success/fail counts, raw orders received, and errors rather than silently showing invented offers. No live purchase permission changes.
+
+If you get **0 offers**, check the diagnostic text below the table, and if the errors mention `401` or `403` create a *publishable* key at https://hub.immutable.com/ and paste it into Settings → Immutable publishable API key → Save. Never paste a secret API key or wallet private key there. If the API returned raw orders but none are displayed, the diagnostics show observed payment token types, so we can adapt parsing safely. **No current live connection or purchase was verified by the authoring environment.**
+
+The app only scans external Immutable WETH-priced NFT orders, not the separate in-game Emerald collectibles market.
 
 ## What you'll see
 

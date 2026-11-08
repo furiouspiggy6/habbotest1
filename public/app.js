@@ -18,7 +18,11 @@ function renderBanner(){const isLive=data.settings.mode==='live';$('modeBadge').
  const b=$('banner');b.className='banner '+(isLive?'live-banner':'demo-banner');
  let title=isLive?'Real Immutable market data':'Demo trading environment';
  let copy=isLive?'Live NFT listing data. Actual purchases remain OFF unless the live autobuyer is specifically armed.':'Sample prices only — no NFT transactions occur. Switch to Live Data under settings to scan actual listings.';
- if(isLive&&data.warnings.some(w=>w.includes('error')||w.includes('No matching'))){b.className='banner error-banner';title='Check live market data';copy=data.warnings[0]||'Unable to retrieve listings.';}
+ if(isLive&&data.warnings.length){
+  b.className='banner error-banner';title=data.stats.failedRequests?'Immutable API connection problems':'Live market scan warnings';
+  copy=data.warnings[0];
+ }
+ $('bannerGo').textContent=isLive?'View scan details →':'Scan real NFTs →';
  b.querySelector('b').textContent=title;b.querySelector('span:not(.banner-icon)').textContent=copy;
  $('connectionPill').innerHTML='<span class="pulse-dot"></span> '+(data.scanning?'SCANNING':isLive?'LIVE DATA':'DEMO CONNECTED');}
 function renderStats(){const rows=data.rows||[];$('statListings').textContent=rows.length;$('statOpportunities').textContent=rows.filter(x=>x.eligible).length;
@@ -27,7 +31,8 @@ function renderStats(){const rows=data.rows||[];$('statListings').textContent=ro
  const canBuy=data.armed&&data.settings.mode==='live';$('autobuyIndicator').textContent=canBuy?'● LIVE ARMED':data.settings.mode==='demo'?'● PAPER':'● DISARMED';
  $('autobuyIndicator').style.color=canBuy?'#f87982':'#55e0bc';
  $('engineText').textContent=data.settings.mode==='demo'?'Paper trading only. Matching demo opportunities are logged automatically if enabled.':canBuy?'REAL MONEY purchasing is active. One eligible NFT at most per scan; it disarms on error or restart.':'Live market scanner is running. Real buying is OFF until separately enabled with a dedicated wallet and confirmation phrase.';
- $('coverageText').textContent=data.settings.mode==='demo'?'Demonstration data · invented NFT examples':`${data.stats.pages} orderbook pages · ${data.stats.truncated?'PARTIAL coverage':'pagination limit not hit'} · ${data.warnings.length} warning(s)`;
+ $('coverageText').textContent=data.settings.mode==='demo'?'Demonstration data · invented NFT examples':`${data.stats.rawOrders??0} raw orders · ${data.stats.pages} pages · ${data.stats.failedRequests??0} failed requests · ${data.stats.truncated?'PARTIAL coverage':'page scan complete'} · ${data.warnings.length} warnings`;
+ $('scanDiagnostics').textContent=data.settings.mode==='demo'?'This is demo data. Click Scan real NFTs above to load the Immutable market.':([`Immutable requests: ${data.stats.successfulRequests??0} successful / ${data.stats.failedRequests??0} failed. ${data.stats.rawOrders??0} raw orders received.`,...data.warnings].join('\n')); 
 }
 function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),collection=$('collectionFilter').value,signal=$('signalFilter').value;
  const found=(data?.rows??[]).filter(x=>(!text||(`${x.name} ${x.tokenId} ${x.collection}`).toLowerCase().includes(text))&&(!collection||x.collection===collection)&&(signal!=='eligible'||x.eligible));
@@ -93,7 +98,7 @@ async function sync(){try{const incoming=await api('/api/state');data=incoming;
  if(currentTab==='market')void loadChart();
  }catch(e){$('connectionPill').textContent='OFFLINE';if(!data)toast('Cannot contact the local server: '+e.message,true);}}
 document.querySelectorAll('.nav').forEach(b=>b.addEventListener('click',()=>view(b.dataset.tab)));
-$('bannerGo').addEventListener('click',()=>view('settings'));
+$('bannerGo').addEventListener('click',async()=>{if(data?.settings.mode==='demo'){try{await api('/api/settings',{...data.settings,mode:'live'});settingsLoaded=false;toast('Live Immutable NFT scan started. Real buying stays OFF.');await sync();}catch(err){toast(err.message,true);}}else{view('trades');}});
 $('engineButton').addEventListener('click',()=>view('settings'));
 $('refreshBtn').addEventListener('click',async()=>{try{await api('/api/refresh',{});toast('Market refresh started');}catch(e){toast(e.message,true);}});
 $('searchInput').addEventListener('input',filterRows);$('collectionFilter').addEventListener('change',filterRows);$('signalFilter').addEventListener('change',filterRows);

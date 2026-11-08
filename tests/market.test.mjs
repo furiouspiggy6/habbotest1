@@ -8,7 +8,7 @@ test('orderbook pagination, deduplication and coverage flag',async()=>{
  const calls=[];
  const fake={listListings:async req=>{calls.push(req);return req.pageCursor?{result:[order('a'),order('b')],page:{}}:{result:[order('a')],page:{next_cursor:'second'}};}};
  const result=await collectPage(fake,col,'ACTIVE',2);
- assert.deepEqual(result.orders.map(x=>x.id),['a','b']);assert.equal(result.limited,false);assert.equal(result.pages,2);assert.equal(calls[1].pageCursor,'second');
+ assert.deepEqual(result.orders.map(x=>x.id),['a','b']);assert.equal(result.limited,false);assert.equal(result.pages,2);assert.equal(result.received,3);assert.ok(result.quoteTypes.some(v=>v.includes('ERC20')));assert.equal(calls[1].pageCursor,'second');
 });
 test('warn when orderbook pagination capped',async()=>{
  const result=await collectPage({listListings:async()=>({result:[order('x')],page:{next_cursor:'next'}})},col,'ACTIVE',1);

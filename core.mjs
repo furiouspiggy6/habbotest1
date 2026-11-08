@@ -10,7 +10,7 @@ export const COLLECTIONS = [
   {name:'Legacy Clothes 1155',address:'0xe39e60393d25adb35158052572b06af2294d98cc',enabled:false}
 ];
 export const DEFAULT_SETTINGS = Object.freeze({
-  mode:'demo', paperAutoBuy:true, refreshSeconds:90, pagesPerCollection:3,
+  mode:'live', paperAutoBuy:true, refreshSeconds:90, pagesPerCollection:6,
   minDiscountPct:25, minSales30d:3, minNetEdgePct:12,
   estimatedResaleFeesPct:7.5, maximumPriceEth:0.015,
   minPriceEth:0.00005, dailyBudgetEth:0.05, maxPurchasesPerDay:5,
@@ -88,7 +88,7 @@ export function validateSettings(s){
   n[k]=['refreshSeconds','pagesPerCollection','minSales30d','maxPurchasesPerDay'].includes(k)?Math.floor(x):x;
  }
  if(n.dailyBudgetEth<n.maximumPriceEth)throw new Error('Daily budget must be >= maximum purchase price');
- n.mode=s?.mode==='live'?'live':'demo'; n.paperAutoBuy=Boolean(s?.paperAutoBuy??true);
+ n.mode=s?.mode==='demo'?'demo':'live'; n.paperAutoBuy=Boolean(s?.paperAutoBuy??true);
  n.publishableKey=String(s?.publishableKey??'').trim().slice(0,200);
  n.collections=COLLECTIONS.map(c=>({...c,enabled:(s?.collections??COLLECTIONS).some(x=>x.address===c.address&&x.enabled)}));
  if(!n.collections.some(x=>x.enabled))throw new Error('Choose at least one collection');return n;
