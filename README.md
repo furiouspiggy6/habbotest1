@@ -128,3 +128,19 @@ irm https://raw.githubusercontent.com/furiouspiggy6/habbotest1/main/REPAIR_WINDO
 The script verifies the GitHub release ZIP using its SHA-256 sidecar, checks package identity/version, protects `data/` and `.env`, refuses to run while real-money trading is armed, stops only the app on its localhost port (when it is a node server.mjs process), stages the official update script and restarts the app. It does not require manual ZIP handling. Review the script on GitHub before using a remote script command. If there are multiple installed copies, run it in the folder of the copy you launch.
 
 New in v1.0.9: the updater checks GitHub even during a lengthy NFT scan, pauses new scans while an update is pending, then installs once the current scan finishes. If another copy owns the dashboard port, the launcher now prints that process's reported version rather than quietly opening the wrong dashboard.
+
+
+## v1.0.11 - Windows updater recovery and verified restart
+
+The update worker now launches Node **directly**, instead of passing the batch-file path to `cmd /c`.
+After copying a new release it probes `http://127.0.0.1:38571/api/state` and requires the **expected version** to respond before marking the installation successful. If startup fails, it restores the previous source/dependencies and attempts to relaunch the previous version. Each attempt records `data/updates/last-update.log` and `data/updates/last-start.stderr.log`. No `.env` secrets or `data/state.json` are modified.
+
+The live scanner has no external runtime npm dependencies. The staged installer skips npm entirely when a release has none. The browser reloads itself when it sees a server version change.
+
+**If your browser stopped after updating:** do not refresh it repeatedly: the browser is not the application server. First try double-clicking `START_WINDOWS.bat` in the installed folder. If the updater left the install incomplete, open PowerShell in that folder and run the one-time repair command:
+
+```powershell
+irm https://raw.githubusercontent.com/furiouspiggy6/habbotest1/main/REPAIR_WINDOWS.ps1 | iex
+```
+
+The recovery tool uses the latest published GitHub ZIP and checksum automatically; no manual ZIP download is required. It verifies that the new API is running before declaring success. These Windows updater behaviors have not been end-to-end tested on a real Windows system; Node tests verify the application server and static updater protections.
