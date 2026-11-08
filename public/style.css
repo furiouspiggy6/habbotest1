@@ -68,3 +68,10 @@ body.inspect-open{overflow:hidden}
 .open-sea-key-status[data-status="rate-limited"],.open-sea-key-status[data-status="checking"]{color:#f4ce91;background:#423424;border-color:#8a683f}
 #testOpenSeaBtn:disabled{opacity:.5;cursor:default;transform:none}
 #openSeaConnectionDetails{overflow-wrap:anywhere;line-height:1.6}
+
+/* v2.0.19: sortable opportunity score and optional deep scan controls. */
+.opportunity-score{display:inline-block;min-width:53px;padding:5px 7px;border-radius:6px;border:1px solid #4b596a;background:#202d3a;color:#c8d8e4;font-weight:850;font-variant-numeric:tabular-nums}
+.opportunity-score.strong{color:#86ead2;border-color:#286c5e;background:#15382f}
+.score-confidence{display:block;margin-top:5px;color:#8599ab;font-size:9px;white-space:nowrap}
+#deepScanStatus{font-size:11px;line-height:1.5;margin:0}
+#runDeepScanBtn:disabled{opacity:.45;cursor:default;transform:none}
