@@ -90,3 +90,39 @@ test('failed metadata fetch is deferred rather than permanently blocking followi
  assert.equal(result.failed,1);
  assert.deepEqual(prioritizedMetadataOrders([obj],[],cache,10),[]);
 });
+
+test('historical sale backfill advances across refreshes without replaying only the first pages',async()=>{
+ const {scanMarket}=await import('../market.mjs');
+ const {DEFAULT_SETTINGS}=await import('../core.mjs');
+ const contract=col.address;
+ const progress={};
+ const calls=[];
+ const mk=(n)=>order('filled-'+n,'FILLED',String(n));
+ const clients={
+  orderbook:{listListings:async req=>{
+   calls.push({...req});
+   if(req.status==='ACTIVE')return {result:[order('active-one','ACTIVE','99')],page:{}};
+   const n=Number(req.pageCursor||0);
+   return {result:[mk(n)],page:{next_cursor:n<6?String(n+1):null}};
+  }},
+  blockchainData:{getNFT:async()=>{throw Error('not expected to request cached metadata');}}
+ };
+ const cache={};
+ for(let i=0;i<=6;i++)cache[`${contract}|${i}`]={name:'Known collectible'};
+ cache[`${contract}|99`]={name:'Known collectible'};
+ const settings={...DEFAULT_SETTINGS,pagesPerCollection:4,collections:DEFAULT_SETTINGS.collections.map(c=>({...c,enabled:c.address===contract}))};
+ const first=await scanMarket(settings,cache,progress,clients);
+ assert.equal(first.historyPending,1);
+ assert.equal(progress[`${contract}:FILLED`],'4');
+ assert.deepEqual(first.filled.map(s=>s.id),['filled-0','filled-1','filled-2','filled-3']);
+ const second=await scanMarket(settings,cache,progress,clients);
+ assert.equal(second.historyPending,0);
+ assert.equal(progress[`${contract}:FILLED`],null);
+ assert.deepEqual(second.filled.map(s=>s.id),['filled-0','filled-4','filled-5','filled-6']);
+ assert.equal(calls.filter(c=>c.status==='ACTIVE').length,2);
+ assert.deepEqual(calls.filter(c=>c.status==='ACTIVE').map(c=>c.pageCursor),[undefined,undefined]);
+ assert.equal(second.listings.length,1);
+ const third=await scanMarket(settings,cache,progress,clients);
+ assert.equal(third.historyPending,1);
+ assert.equal(progress[`${contract}:FILLED`],'4');
+});
