@@ -1,6 +1,46 @@
 import {COLLECTIONS,normalizeOrder,orderRejectionReason,hydrateNames} from './core.mjs';
 
 const chainName='imtbl-zkevm-mainnet';
+const API_BASE='https://api.immutable.com';
+const readHeaders=key=>({
+  Accept:'application/json',
+  ...(key?{'x-immutable-publishable-key':key}:{})
+});
+// Read-only endpoints, using Node's built-in fetch. No installed SDK or wallet is needed
+// for the marketplace monitor, price history, and metadata lookup.
+export function createReadClients(publishableKey='',fetcher=globalThis.fetch,apiBase=API_BASE){
+ if(typeof fetcher!=='function')throw new Error('Node.js fetch API is unavailable (Node 24+ required).');
+ const headers=readHeaders(publishableKey);
+ async function read(path,query={}){
+  const url=new URL(path,apiBase);
+  for(const [name,value] of Object.entries(query))if(value!==undefined && value!==null && String(value)!=='')url.searchParams.set(name,String(value));
+  let response;
+  try {response=await fetcher(url.toString(),{method:'GET',headers,signal:AbortSignal.timeout(16000)});}
+  catch(err){throw new Error(`Immutable API request failed (${url.pathname}): ${String(err?.message??err).slice(0,160)}. Check internet, DNS or firewall.`);}
+  let result;
+  const body=await response.text();
+  try{result=JSON.parse(body);}catch{
+   if(response.ok)throw new Error(`Immutable API returned invalid JSON for ${url.pathname}`);
+   result={message:body.slice(0,160).replace(/<[^>]+>/g,' ').trim()};
+  }
+  if(!response.ok){
+   const detail=String(result?.message??result?.error?.message??result?.error??'request refused').slice(0,180);
+   const instruction=[401,403].includes(response.status)?' Check the Immutable Hub publishable key in Strategy & Settings.':response.status===429?' Rate limited: increase the refresh interval.':'';
+   throw new Error(`Immutable HTTP ${response.status}: ${detail}.${instruction}`);
+  }
+  return result;
+ }
+ return {
+  orderbook:{listListings:request=>read(`/v1/chains/${chainName}/orders/listings`,{
+    sell_item_contract_address:request.sellItemContractAddress,
+    status:request.status,
+    page_size:request.pageSize,
+    page_cursor:request.pageCursor
+  })},
+  blockchainData:{getNFT:request=>read(`/v1/chains/${chainName}/collections/${encodeURIComponent(request.contractAddress)}/nfts/${encodeURIComponent(request.tokenId)}`)}
+ };
+}
+
 const sleep=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const unwrap=x=>x?.result?.result??x?.result??x;
 export function unpackPage(x){
@@ -23,8 +63,8 @@ export function unpackPage(x){
 
 export async function makeClients(key){
  let pkg;
- try {pkg=await import('@imtbl/sdk');} catch {
-  throw new Error('Immutable SDK is not installed. Run npm install (START_WINDOWS.bat does this).');
+ try {pkg=await import('@imtbl/sdk');} catch (err) {
+  throw new Error(`Trading SDK failed to load: ${String(err?.message??err).slice(0,230)}. This affects experimental live buying only; NFT market scanning uses the REST API.`);
  }
  const {config,orderbook,blockchainData}=pkg;
  const cfg={environment:config.Environment.PRODUCTION};
@@ -66,7 +106,7 @@ function metadataFromNFT(response){
  if(typeof image!=='string'||!/^https:\/\//.test(image))image='';
  return name?{name:String(name).slice(0,100),metadataId:metadataId?String(metadataId):null,image}:null;
 }
-export async function resolveMetadata(client,orders,cache,limit=220){
+export async function resolveMetadata(client,orders,cache,limit=80){
  const items=[...new Map(orders.map(o=>[`${o.contract}|${o.tokenId}`,o])).values()];
  const needed=items.filter(o=>!cache[`${o.contract}|${o.tokenId}`]).slice(0,limit);
  let ok=0,failed=0,index=0,firstError='';
@@ -79,7 +119,7 @@ export async function resolveMetadata(client,orders,cache,limit=220){
  return {cache,ok,failed,firstError,remaining:items.filter(o=>!cache[`${o.contract}|${o.tokenId}`]).length};
 }
 export async function scanMarket(settings,cache){
- const clients=await makeClients(settings.publishableKey);
+ const clients=createReadClients(settings.publishableKey);
  let listings=[],filled=[],warnings=[],pages=0,truncated=0,received=0,failedRequests=0,successfulRequests=0;
  const diagnostics=[];const rejected={};
  const quotes=new Set();
