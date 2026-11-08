@@ -208,3 +208,8 @@ coverage warning) from older sale-history indexing progress. The Recorded Sales 
 shows locally cached unique sale records rather than only the newest response. Real-money
 buying remains disarmed by default, and no stale ACTIVE offers are merged into the trade
 feed. Immutable API failures and incomplete coverage are never suppressed.
+
+
+## v2.0.4: desktop updater release-status verification
+
+The desktop app now verifies the latest published Windows release against GitHub's Releases API independently of electron-updater. If an auto-update check incorrectly reports no update while a newer stable installer and `latest.yml` exist, the app explicitly reports the version mismatch and provides a button to open the **official GitHub installer** instead of displaying the false "up to date" message. This fallback does not execute unknown files automatically. It validates the expected Windows asset name and official GitHub URL, and does not transmit local settings or wallet information. Automatic updating remains the primary path. A successful Windows build still must publish both the installer and `latest.yml` on GitHub.
