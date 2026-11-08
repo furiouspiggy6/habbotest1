@@ -76,13 +76,18 @@ try {
       Copy-Item -LiteralPath $oldPath -Destination $dest -Recurse -Force
     }
   }
-  # Backup existing node_modules by moving rather than copying gigabytes.
-  if (Test-Path -LiteralPath $installedModules) {
-    Move-Item -LiteralPath $installedModules -Destination $backupModules
-  }
+  # npm creates no node_modules folder for dependency-free packages. Only swap when it exists.
+  $stagedModules = Join-Path $sourcePath 'node_modules'
+  if (Test-Path -LiteralPath $stagedModules) {
+    if (Test-Path -LiteralPath $installedModules) {
+      Move-Item -LiteralPath $installedModules -Destination $backupModules
+    }
+  } else { Log 'No dependencies required by release; retaining previous node_modules if present.' }
   try {
-    Move-Item -LiteralPath (Join-Path $sourcePath 'node_modules') -Destination $installedModules
-    $modulesSwapped = $true
+    if (Test-Path -LiteralPath $stagedModules) {
+      Move-Item -LiteralPath $stagedModules -Destination $installedModules
+      $modulesSwapped = $true
+    }
     $filesTouched = $true
     foreach ($name in $files) {
       $new = Join-Path $sourcePath $name
