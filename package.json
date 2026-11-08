@@ -9,7 +9,7 @@
     "start:legacy": "node server.mjs",
     "test": "npm run check:ui && node --test tests/*.test.mjs tests/*.test.cjs",
     "dist:win": "electron-builder --win nsis --x64 --publish never",
-    "check:ui": "node --check public/app.js && node --check public/listing-views.mjs && node --check market-floor.mjs && node --check server.mjs && node --check core.mjs && node --check fiat.mjs && node --check trade.mjs"
+    "check:ui": "node --check public/app.js && node --check public/listing-views.mjs && node --check market.mjs && node --check market-floor.mjs && node --check server.mjs && node --check core.mjs && node --check fiat.mjs && node --check trade.mjs"
   },
   "engines": {
     "node": ">=24"
