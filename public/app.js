@@ -15,7 +15,7 @@ const audLimit=value=>value===null||value===undefined||!Number.isFinite(Number(v
 const editableAud=value=>value===null||value===undefined||!Number.isFinite(Number(value))?'':Number(Number(value).toFixed(4));
 let data=null,selectedId=null,selectedKey=null,currentTab='market',days=30,currentChart=null,settingsLoaded=false,lastChartRequest=0;
 const ROWS_PER_PAGE=100;
-let pageIndex=0, cachedRows=[], cachedScanAt=null, audControlsReady=false;
+let pageIndex=0, cachedRows=[], cachedScanAt=null, audControlsReady=false, visibleRows=[];
 let toastTimer;
 let availableUpdate=null, updateBusy=false;
 function toast(message,error=false){const e=$('toast');e.textContent=message;e.className='toast'+(error?' error':'');e.hidden=false;clearTimeout(toastTimer);toastTimer=setTimeout(()=>e.hidden=true,4500);}
@@ -24,7 +24,7 @@ async function api(url,body=null){const r=await fetch(url,body===null?{}:{method
 function view(tab){currentTab=tab;for(const t of ['market','trades','settings'])$(t+'Tab').hidden=t!==tab;
  document.querySelectorAll('.nav').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
  if(tab==='trades')renderTrades();if(tab==='settings')renderReadiness();}
-function selectedRow(){return data?.rows?.find(r=>r.id===selectedId)??data?.rows?.[0]??null;}
+function selectedRow(){return visibleRows.find(r=>r.id===selectedId)??visibleRows[0]??null;}
 function renderBanner(){
  const hasListings=Number(data?.listingCount)>0;
  const connected=Number(data.stats?.successfulRequests)>0;
@@ -76,8 +76,20 @@ function renderStats(){$('statListings').textContent=data.listingCount??0;$('sta
  const reasons=cd?`Why no candidates (first failing criterion per listing): ${cd.missingMetadata} missing NFT metadata; ${cd.insufficientComparableSales} insufficient comparable sales; ${cd.priceOutsideLimits} outside AUD price limits; ${cd.belowFiatMinimum??0} below dollar minimum or missing exchange rate; ${cd.discountTooSmall} below discount threshold; ${cd.netEdgeTooSmall} below net-edge threshold; ${cd.multiQuantity} multi-quantity; ${cd.eligible} eligible.`:'Candidate breakdown not available yet.';
  $('scanDiagnostics').textContent=([`Immutable scan segments: ${data.stats.successfulRequests??0} completed / ${data.stats.failedRequests??0} failed or interrupted. ${data.stats.rawOrders??0} raw orders received.`,coverage,historyLine,reasons,...data.warnings,`Rejected orders: ${JSON.stringify(data.stats.rejected||{})}`, ...((data.stats.diagnostics||[]).map(d=>`${d.collection} ${d.status}: ${d.error||`${d.accepted}/${d.raw} accepted (${d.pages} pages)${d.shape?' shape='+JSON.stringify(d.shape):''}`}`))].join('\n')); 
 }
+function withinAudRange(row){
+ const spot=audSpot(),limits=data?.audLimits,settings=data?.settings;
+ if(!spot||!limits||!settings)return false;
+ const list=Number(row.price)*spot,total=Number(row.totalWithFeesEth)*spot;
+ const minimum=Number(limits.minPriceAud),maximum=Number(limits.maximumPriceAud),withFees=Number(settings.minimumFiatPrice);
+ return Number.isFinite(list)&&Number.isFinite(total)&&
+  Number.isFinite(minimum)&&Number.isFinite(maximum)&&Number.isFinite(withFees)&&
+  list>=minimum&&total>=withFees&&total<=maximum;
+}
 function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),collection=$('collectionFilter').value,signal=$('signalFilter').value;
- const found=(data?.rows??[]).filter(x=>(!text||(`${x.name} ${x.tokenId} ${x.collection}`).toLowerCase().includes(text))&&(!collection||x.collection===collection)&&(signal!=='eligible'||x.eligible));
+ const found=(data?.rows??[]).filter(x=>(!text||(`${x.name} ${x.tokenId} ${x.collection}`).toLowerCase().includes(text))&&(!collection||x.collection===collection)&&
+  (signal==='all'||(signal==='eligible'?x.eligible:withinAudRange(x))));
+ visibleRows=found;
+ if(!found.some(r=>r.id===selectedId))selectedId=found[0]?.id??null;
  $('scannerCount').textContent=data.candidateCount??0;
  $('resultCount').textContent=found.length===data.listingCount?`${found.length} live listings`:`${found.length} matching of ${data.listingCount??0} live listings`;
  const totalPages=Math.max(1,Math.ceil(found.length/ROWS_PER_PAGE));
@@ -93,7 +105,27 @@ function filterRows(){const text=$('searchInput').value.trim().toLowerCase(),col
   event.stopPropagation();selectedId=btn.dataset.inspectOrder;
   renderMarket();void loadChart(true);void openInspect(selectedId);
  }));
- $('emptyRows').hidden=limited.length>0;
+ const empty=$('emptyRows');
+ empty.hidden=limited.length>0;
+ if(!limited.length){
+  const heading=empty.querySelector('b'),help=empty.querySelector('small');
+  if(!Number(data?.listingCount)){
+   heading.textContent='No live NFT listings received yet.';
+   help.textContent='Check the Immutable connection diagnostics, then refresh.';
+  }else if(signal==='eligible'){
+   heading.textContent='No NFTs currently qualify as buying candidates.';
+   help.textContent=`${data.listingCount} real listings were scanned, but none passed all of your buying rules. Select “Within my price range” to see affordable listings that are still on watch.`;
+  }else if(signal==='range'&&!audSpot()){
+   heading.textContent='AUD price-range filter needs a fresh exchange rate.';
+   help.textContent='The ETH/AUD quote is unavailable. Listings are still available under “All listings”; buying stays blocked until a fresh quote is received.';
+  }else if(signal==='range'){
+   heading.textContent='No NFTs found within your configured AUD price range.';
+   help.textContent=`Your range is ${audLimit(data.audLimits?.minPriceAud)} minimum listing price to ${audLimit(data.audLimits?.maximumPriceAud)} maximum total price, plus a ${audLimit(data.settings?.minimumFiatPrice)} minimum including fees. Try “All listings” or change the spending settings.`;
+  }else{
+   heading.textContent='No listings match these filters.';
+   help.textContent='Clear the search or collection filter. The market still has live listings.';
+  }
+ }
 }
 function renderMarket(){if(!data)return;renderBanner();renderStats();filterRows();renderDetail();}
 function renderDetail(){const r=selectedRow();
