@@ -56,3 +56,17 @@ test('candidate diagnostics labels fiat-floor rejection accurately',()=>{
  const counts=candidateDiagnostics([row],s);
  assert.equal(counts.belowFiatMinimum,1);
 });
+
+test('Windows desktop packages the public rate reader and settings control',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const pkg=JSON.parse(readFileSync(new URL('../package.json',import.meta.url),'utf8'));
+ const html=readFileSync(new URL('../public/index.html',import.meta.url),'utf8');
+ const ui=readFileSync(new URL('../public/app.js',import.meta.url),'utf8');
+ const server=readFileSync(new URL('../server.mjs',import.meta.url),'utf8');
+ assert.ok(pkg.build.files.includes('fiat.mjs'),'fiat module must ship in the Windows installer');
+ assert.match(html,/id="minimumFiatPrice"/);
+ assert.match(html,/id="fiatCurrency"/);
+ assert.match(ui,/fiatCurrency:\$('fiatCurrency'\).value/);
+ assert.match(server,/displayRows=applyFiatMinimum\(/);
+ assert.match(server,/fiatMinimumStatus\(state.settings,fiatRates\).available/);
+});
