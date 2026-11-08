@@ -15,7 +15,8 @@ test('dashboard click handler registrations and initialization are not duplicate
  for(const unique of ['const fields=','async function sync()','function renderMarket()','function fillSettings()','function renderInspection(','await sync();setInterval(sync,4000);']){
   assert.equal(js.split(unique).length-1,1,'Unexpected duplicate or missing UI code: '+unique);
  }
- assert.ok(js.length<45000,'UI code unexpectedly bloated by duplicate substitution');
+ // The score inspector and scheduled deep-scan settings intentionally expanded the UI.
+ assert.ok(js.length<55000,'UI code unexpectedly bloated by duplicate substitution');
  assert.match(js,/document\.querySelectorAll\('\.nav'\)\.forEach\(b=>b\.addEventListener\('click'/);
  assert.doesNotMatch(js,/\$\('fiatCurrency'\)/);
  for(const id of ['maximumPriceAud','dailyBudgetAud','minPriceAud'])assert.ok(js.includes(id));
