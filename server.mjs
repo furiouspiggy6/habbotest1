@@ -42,6 +42,17 @@ function save(){const output={schemaVersion:9,settings:state.settings,updatePref
 function event(kind,message){state.events.unshift({kind,message,time:Date.now()});state.events=state.events.slice(0,400);console.log(`[${kind}] ${message}`);}
 function today(t){return new Date(t).toISOString().slice(0,10);}
 function usedBudget(trades){const d=today(Date.now());return trades.filter(t=>today(t.timestamp)===d && ['completed','pending'].includes(t.status)).reduce((v,t)=>v+t.costEth,0);}
+function usedBudgetAud(trades,spot){
+ const d=today(Date.now());
+ let total=0;
+ for(const t of trades.filter(t=>today(t.timestamp)===d&&['completed','pending'].includes(t.status))){
+  const saved=Number(t.costAud);
+  if(t.costAud!==undefined&&t.costAud!==null&&Number.isFinite(saved)&&saved>=0){total+=saved;continue;}
+  if(!Number.isFinite(spot)||spot<=0)return null;
+  total+=(Number(t.costEth)||0)*spot;
+ }
+ return total;
+}
 function dayCount(trades){const d=today(Date.now());return trades.filter(t=>today(t.timestamp)===d && ['completed','pending'].includes(t.status)).length;}
 function safeSummary(){return {
  appVersion:LOCAL_VERSION,installDirectory:HERE,updateRepository:GITHUB_REPO,updatePrefs:state.updatePrefs,updateStatus,
@@ -53,11 +64,15 @@ function safeSummary(){return {
  listingCount:displayRows.length,candidateCount:displayRows.filter(x=>x.eligible).length,
  rows:displayRows.slice(0,50),events:state.events.slice(0,60),
  liveTrades:state.liveTrades.slice(-100).reverse(),
- liveSpentToday:usedBudget(state.liveTrades)
+ liveSpentToday:usedBudget(state.liveTrades),
+ liveSpentTodayAud:usedBudgetAud(state.liveTrades,fiatMinimumStatus({...state.settings,fiatCurrency:'AUD'},fiatRates).spot)
  };}
-function eligibleForBudget(r,trades,limits){return r.eligible &&
+function eligibleForBudget(r,trades,limits,spot){return r.eligible &&
   !trades.some(t=>t.orderId===r.id)&&
   usedBudget(trades)+r.totalWithFeesEth<=limits.dailyBudgetEth &&
+  (state.settings.dailyBudgetAud===null||state.settings.dailyBudgetAud===undefined||
+   (Number.isFinite(spot)&&spot>0&&usedBudgetAud(trades,spot)!==null&&
+    usedBudgetAud(trades,spot)+r.totalWithFeesEth*spot<=state.settings.dailyBudgetAud)) &&
   dayCount(trades)<limits.maxPurchasesPerDay;}
 async function doAutoTrades(){
  if(!displayRows.length)return;
@@ -69,18 +84,18 @@ async function doAutoTrades(){
   }
   setAllowedContracts(state.settings.collections);
   // One live purchase per scan; never retry an ambiguous or failed order automatically.
-  const target=displayRows.find(x=>eligibleForBudget(x,state.liveTrades,risk.settings)&&
+  const target=displayRows.find(x=>eligibleForBudget(x,state.liveTrades,risk.settings,risk.spot)&&
     x.metadataResolved&&x.sales30d>=state.settings.minSales30d);
   if(!target)return;
   const attempt={timestamp:Date.now(),orderId:target.id,name:target.name,collection:target.collection,
-    costEth:target.totalWithFeesEth,fairValueEth:target.reference,discount:target.discount,status:'pending',mode:'live'};
+    costEth:target.totalWithFeesEth,costAud:target.totalWithFeesEth*risk.spot,fairValueEth:target.reference,discount:target.discount,status:'pending',mode:'live'};
   // Do not shut down for an updater while any wallet transaction is in flight,
   // even if the user disarms buying after that transaction was submitted.
   liveBuyInFlight=true;
   try {
    state.liveTrades.push(attempt);save();event('live',`Trying LIVE purchase: ${target.name}`);
    const result=await executeLiveBuy(target,risk.settings,process.env.HABBO_BOT_PRIVATE_KEY);
-   attempt.status='completed';attempt.hash=result.hash;attempt.costEth=result.priceEth;
+   attempt.status='completed';attempt.hash=result.hash;attempt.costEth=result.priceEth;attempt.costAud=result.priceEth*risk.spot;
    event('success',`LIVE purchase confirmed ${target.name} — ${result.hash}`);
   }catch(error){attempt.status='failed';attempt.error=String(error?.message??error).slice(0,280);
    liveArmed=false;event('error',`LIVE attempt failed; buying DISARMED: ${attempt.error}`);
@@ -108,6 +123,8 @@ async function scan(){if(scanning||updating)return;scanning=true;
   state.historicalSales=hydrateNames([...salesById.values()],state.metadata).filter(x=>x.timestamp>=threshold).slice(-16000);
   chartSales=state.historicalSales;
   activeListings=listings;
+  // A deep market scan can outlive the FX quote TTL.
+  await refreshFiatRates();
   const risk=effectiveAudSettings(state.settings,fiatRates);
   displayRows=applyFiatMinimum(analyze(listings,chartSales,risk.settings),state.settings,fiatRates)
     .map(row=>({...row,eligible:row.eligible&&risk.available,
