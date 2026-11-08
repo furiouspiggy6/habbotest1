@@ -22,11 +22,18 @@ function parseGitHubRelease(release,currentVersion){
  const exe=`Habbo-NFT-Market-Radar-Setup-${version}.exe`;
  const asset=release.assets?.find(item=>item.name===exe);
  const manifest=release.assets?.find(item=>item.name==='latest.yml');
- const installerUrl=`https://github.com/${REPO}/releases/download/${encodeURIComponent(tag)}/${encodeURIComponent(exe)}`;
- if(!asset||asset.browser_download_url!==installerUrl||!manifest||asset.size<10_000_000){
-  throw new Error(`Latest release v${version} is missing its Windows installer or auto-update manifest`);
+ // Pin the native update feed to the SAME version the GitHub Releases API
+ // verified. The old GitHub provider occasionally resolved an older latest.yml
+ // despite releases/latest showing a newer published version.
+ if(tag!==`v${version}`)throw new Error('Unexpected Windows release tag format');
+ const feedUrl=`https://github.com/${REPO}/releases/download/${encodeURIComponent(tag)}`;
+ const installerUrl=`${feedUrl}/${encodeURIComponent(exe)}`;
+ const manifestUrl=`${feedUrl}/latest.yml`;
+ if(!asset||asset.browser_download_url!==installerUrl||!manifest||manifest.browser_download_url!==manifestUrl||
+     asset.size<10_000_000||!Number.isFinite(manifest.size)||manifest.size<30){
+  throw new Error(`Latest release v${version} is missing its official Windows installer or native update manifest`);
  }
- return {version,latestTag:tag,newer:compareVersions(version,currentVersion)>0,installerUrl,
+ return {version,latestTag:tag,newer:compareVersions(version,currentVersion)>0,installerUrl,manifestUrl,feedUrl,
    releaseUrl:`https://github.com/${REPO}/releases/tag/${encodeURIComponent(tag)}`};
 }
 async function fetchLatestRelease(currentVersion,fetcher=globalThis.fetch){
