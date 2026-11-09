@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {WETH} from '../core.mjs';
 import {parseDirectBid,addBidEvidence,decideAutomatically,decisionSummary} from '../bid-market.mjs';
-import {createReadClients,scanMarket} from '../market.mjs';
+import {createReadClients,scanMarket,collectDirectBids} from '../market.mjs';
 import {scoreOpportunityRows} from '../opportunity.mjs';
 const col={address:'0x'+'c'.repeat(40),name:'Clothes',enabled:true};
 const other={address:'0x'+'b'.repeat(40),name:'Furni'};
@@ -102,4 +102,53 @@ test('bundled runtime trading SDK and Ethers expose interfaces needed by the gat
  const ethers=await import('ethers');
  assert.equal(typeof sdk.orderbook?.Orderbook,'function');
  assert.equal(typeof ethers.Wallet,'function');
+});
+
+test('bid pagination retrieves beyond the first 50 without inventing missing or stale bids',async()=>{
+ const a=bid({id:'a',start_at:new Date(Date.now()-1000).toISOString(),end_at:new Date(Date.now()+600_000).toISOString()});
+ const b=bid({id:'b',start_at:a.start_at,end_at:a.end_at});
+ const calls=[];
+ const client={listBids:async request=>{
+  calls.push(request.pageCursor??null);
+  if(!request.pageCursor)return {result:[a],page:{next_cursor:'next'}}; 
+  return {result:[b,a],page:{}};
+ }};
+ const result=await collectDirectBids(client,col,2);
+ assert.deepEqual(calls,[null,'next']);
+ assert.equal(result.pages,2);
+ assert.equal(result.received,3);
+ assert.equal(result.bids.length,2);
+ assert.equal(result.partial,false);
+ assert.equal(result.error,null);
+});
+test('bounded bid paging reports partial coverage and retains earlier results when a later page fails',async()=>{
+ const raw=bid({start_at:new Date(Date.now()-1000).toISOString(),end_at:new Date(Date.now()+600_000).toISOString()});
+ let count=0;
+ const client={listBids:async()=>{count++;
+  if(count===1)return {result:[raw],page:{next_cursor:'next'}};
+  throw new Error('API unavailable');
+ }};
+ const res=await collectDirectBids(client,col,5);
+ assert.equal(res.bids.length,1);
+ assert.equal(res.pages,1);
+ assert.equal(res.partial,true);
+ assert.match(res.error,/API unavailable/);
+});
+test('normal scans read up to two bid pages while deep scans can read five',async()=>{
+ const requests=[];
+ const clients={orderbook:{
+  listListings:async()=>({result:[],page:{}}),
+  listBids:async req=>{
+   requests.push(req.pageCursor??null);
+   return {result:[],page:{next_cursor:req.pageCursor?null:'next'}};
+  }
+ },blockchainData:{getNFT:async()=>({})}};
+ const settings={collections:[col],pagesPerCollection:20,publishableKey:''};
+ const normal=await scanMarket(settings,{}, {},clients,[]);
+ assert.equal(normal.bidDiagnostics[0].pages,2);
+ assert.deepEqual(requests,[null,'next']);
+ requests.length=0;
+ const deep=await scanMarket({...settings,pagesPerCollection:40}, {}, {},clients,[]);
+ assert.equal(deep.bidDiagnostics[0].pages,2);
+ assert.deepEqual(requests,[null,'next']);
 });
