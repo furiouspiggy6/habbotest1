@@ -156,6 +156,36 @@ export async function collectPage(client,col,status,limit,pageCursor=null){
  if(cursor)limited=true;
  return {orders:all,limited,nextCursor:cursor,pages,received,pageError,quoteTypes:[...quoteTypes],rejections:Object.fromEntries(rejections),sampleShape};
 }
+
+/** Complete bounded ACTIVE bid pages without treating missing later pages as a
+ * successful full-depth bid book. Never keep stale orders from prior scans.
+ */
+export async function collectDirectBids(client,col,maxPages=2,now=Date.now()){
+ let pageCursor=null,received=0,pages=0,error=null;
+ const found=new Map(),seenCursors=new Set();
+ const limit=Math.max(1,Math.min(6,Number(maxPages)||1));
+ for(let i=0;i<limit;i++){
+  let response;
+  try{
+   response=await client.listBids({
+    buyItemContractAddress:col.address,status:'ACTIVE',pageSize:50,
+    ...(pageCursor?{pageCursor}:{})
+   });
+  }catch(err){error=String(err?.message??err).slice(0,170);break;}
+  const page=unpackPage(response);
+  pages++;received+=page.data.length;
+  for(const item of page.data){
+   const parsed=parseDirectBid(item,col,now);
+   if(parsed)found.set(parsed.id,parsed);
+  }
+  const next=page.next;
+  if(!next||seenCursors.has(next)){pageCursor=null;break;}
+  seenCursors.add(next);
+  pageCursor=next;
+  if(i+1<limit)await sleep(90);
+ }
+ return {bids:[...found.values()],received,pages,partial:!!pageCursor||!!error,error};
+}
 function metadataFromNFT(response){
  const n=unwrap(response);
  const nft=n?.nft??n?.asset??n;
@@ -247,10 +277,14 @@ export async function scanMarket(settings,cache,progress={},clients=createReadCl
   // bid monitoring from overwhelming the primary listings/historical indexer.
   if(typeof clients.orderbook.listBids==='function'){
    try{
-    const raw=await clients.orderbook.listBids({buyItemContractAddress:col.address,status:'ACTIVE',pageSize:50});
-    const page=unpackPage(raw),accepted=page.data.map(b=>parseDirectBid(b,col)).filter(Boolean);
-    bids.push(...accepted);
-    bidDiagnostics.push({collection:col.name,received:page.data.length,accepted:accepted.length,partial:Boolean(page.next),error:null});
+    // Normal scans cover two pages; optional scheduled deep scans can cover five.
+    // Every bid is refreshed on this scan: old orders are not executable evidence.
+    const result=await collectDirectBids(clients.orderbook,col,
+      settings.bidPagesPerCollection??(settings.pagesPerCollection>=40?5:2));
+    bids.push(...result.bids);
+    bidDiagnostics.push({collection:col.name,received:result.received,
+     accepted:result.bids.length,pages:result.pages,partial:result.partial,error:result.error});
+    if(result.error)warnings.push(`${col.name} bids partially unavailable: ${result.error}; valid pages retained as indicative read-only evidence.`);
    }catch(error){
     const message=String(error?.message??error).slice(0,130);
     bidDiagnostics.push({collection:col.name,received:0,accepted:0,partial:false,error:message});
