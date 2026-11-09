@@ -92,12 +92,23 @@ function renderStats(){
  $('autoDecisionHeadline').textContent=bot.ready>0?
   bot.ready+' BUY READY · bot already selected the strongest opportunities':
   'NO SAFE BUY RIGHT NOW · automated monitoring continues';
+ const why=data.stats?.candidateDiagnostics||{};
+ const blockers=[
+  [why.insufficientComparableSales||0,'without enough comparable sales'],
+  [why.priceOutsideLimits||0,'outside spending limits'],
+  [why.discountTooSmall||0,'below discount threshold'],
+  [why.belowConservativeDiscount||0,'below resale discount']
+ ].sort((a,b)=>b[0]-a[0]).filter(x=>x[0]>0).slice(0,2)
+  .map(([count,reason])=>count+' '+reason).join(' · ');
+ const incompleteBids=(data.stats?.bidDiagnostics??[]).filter(x=>x.partial).length;
  $('autoDecisionDetails').textContent=bot.ready>0
   ?(bot.best?.name||'Best candidate')+' · conservative estimated profit '+audLimit(bot.best?.profitAud)+
-    ' · '+bot.watched+' other(s) automatically watched · '+bot.bidsObserved+' direct-token bid(s) matched. '+
+    ' · '+bot.watched+' other(s) automatically watched · '+bot.bidsObserved+' matching direct-token bid(s) found. '+
     (data.armed?'Live autobuyer is armed and will perform its safety checks.':'Purchases remain disabled until you arm the wallet autobuyer.')
-  :bot.watched+' NFT(s) on automatic watch · '+bot.passed+' rejected/insufficient evidence · '+
-   bot.bidsObserved+' matched direct-token bid(s). The bot keeps scanning automatically; you do not need to inspect listings.';
+  :bot.watched+' NFT(s) on automatic watch · '+bot.bidsObserved+' exact-token bids matched to scanned listings. '+
+   (blockers?'Leading reasons: '+blockers+'. ':'')+
+   (incompleteBids?'Bids partially scanned in '+incompleteBids+' collection(s). ':'')+
+   'Scanning continues automatically. A zero-buy result is valid; buying rules were not relaxed.';
  $('statListings').textContent=data.listingCount??0;$('statOpportunities').textContent=data.candidateCount??0;
  $('statSales').textContent=data.stats?.historicalSales??data.stats?.sales??0;$('statSpend').textContent=audLimit(data.liveSpentTodayAud);
  $('riskLimit').textContent=audLimit(data.audLimits?.maximumPriceAud);$('riskDiscount').textContent=data.settings.minDiscountPct+'%';
